@@ -1,0 +1,74 @@
+ 
+  DataSet ds = new DataSet();
+        SqlClass sql = new SqlClass();
+
+public DataTable LoadData(string query,string dsName)
+        {
+            string connStr = ConfigurationManager.ConnectionStrings["ConStringAccounts"].ToString();
+            SqlConnection objConn = new SqlConnection(connStr);
+            objConn.Open();
+
+            if (ds.Tables[dsName] != null)
+            {
+                ds.Tables[dsName].Clear();
+            }
+            string str = "";
+             
+            str += ""+ query + "";
+            SqlDataAdapter sqlda = new SqlDataAdapter(str, objConn);
+            sqlda.SelectCommand = new SqlCommand(str, objConn);
+            sqlda.Fill(ds, dsName);
+            //if (ds.Tables.Count>1)
+            //{
+            //    for (int i = 1; i < ds.Tables.Count; i++)
+            //    {
+            //        ds.Tables[dsName].Merge(ds.Tables[i]);
+            //    }
+            //    objConn.Close();
+            //    return ds.Tables[dsName];
+
+            //}
+
+            objConn.Close();
+            return ds.Tables[dsName];
+
+        }
+
+
+
+
+
+
+  public JsonResult LoadGrid_Issues()
+        {
+            int i = 0;
+            if (ds.Tables["Issues"] != null)
+            {
+                ds.Tables["Issues"].Clear();
+            }
+  string varwhere = " and 0=0";
+            if (txtSearch != null)
+            {
+                if (txtSearch != "")
+                {
+                    varwhere += " and ( S.varBFirstName like '%" + txtSearch + "%' OR  S.varBLastName like '%" + txtSearch + "%' OR M.varVoucher = '" + txtSearch + "' ) ";
+                }
+            }
+
+            string str = " spLoadGridIssues " + sql.getClientId() + " ";
+            DataTable dtDrp = sql.LoadData(str, "Issues");
+            System.Web.Script.Serialization.JavaScriptSerializer serializer = new System.Web.Script.Serialization.JavaScriptSerializer();
+            List<Dictionary<string, object>> rows = new List<Dictionary<string, object>>();
+            Dictionary<string, object> row;
+            foreach (DataRow dr in dtDrp.Rows)
+            {
+                row = new Dictionary<string, object>();
+                foreach (DataColumn col in dtDrp.Columns)
+                {
+                    row.Add(col.ColumnName, dr[col]);
+                }
+                rows.Add(row);
+                i++;
+            }
+            return Json(serializer.Serialize(rows));
+        }
