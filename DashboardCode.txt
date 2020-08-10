@@ -1,0 +1,3917 @@
+//using DLL;
+using AMS.Areas.Accounts.Models;
+using System;
+using System.Collections.Generic;
+using System.Data;
+using System.Linq;
+using System.Web;
+using System.Web.Mvc;
+using System.Data.SqlClient;
+using System.Net;
+using System.IO;
+using System.Globalization;
+using System.Net.Mail;
+using System.Configuration;
+
+using CrystalDecisions.CrystalReports.Engine;
+
+using CrystalDecisions.Shared;
+using Newtonsoft.Json;
+using System.Web.Routing;
+using IronPdf;
+using iTextSharp.text;
+using iTextSharp.text.pdf;
+using iTextSharp.text.html.simpleparser;
+using iTextSharp.tool.xml.pipeline.css;
+using iTextSharp.tool.xml.css;
+using iTextSharp.tool.xml;
+using iTextSharp.tool.xml.pipeline.html;
+using iTextSharp.tool.xml.pipeline.end;
+
+namespace AMS.Areas.Accounts.Controllers
+{
+    public class DashboardsController : Controller
+    {        
+        DataSet ds = new DataSet();
+        SqlClass sql = new SqlClass();
+        Voucherlog Log = new Voucherlog();       
+        public int getCreatedby()
+        {
+            string createdby = "-1";
+            if (System.Web.HttpContext.Current.Session["createdby"] != null)
+            {
+                createdby = System.Web.HttpContext.Current.Session["createdby"].ToString();
+            }
+            return Convert.ToInt32(createdby);
+        }
+
+        [HttpPost]
+        public JsonResult LoadMasterGrid_YarnSaleSummary(string option)
+        {
+            sql.SaveTimeCons("Dashboard", "LoadMasterGrid_YarnSaleSummary", "Function Starting");
+            int i = 0;
+            string varwhere = "and 0=0";
+            
+
+            if (ds.Tables["tblMasterSummary"] != null)
+            {
+                ds.Tables["tblMasterSummary"].Clear();
+            }
+            string query = "";
+
+            if(option=="Item")
+            {
+                query += " [WeavingProdCompanyBase].[dbo].spLoadYarnSaleSummaryWiseTopDesc " + sql.getClientId() + ",'" + varwhere + "' ";
+            }else
+            {
+                query += " [WeavingProdCompanyBase].[dbo].[spLoadYarnSaleSummaryWiseCustomerTopDesc] " + sql.getClientId() + ",'" + varwhere + "' ";
+            }
+
+            DataTable tblDayBook = sql.LoadData(query, "tblMasterSummary");
+            System.Web.Script.Serialization.JavaScriptSerializer serializer = new System.Web.Script.Serialization.JavaScriptSerializer();
+            List<Dictionary<string, object>> rows = new List<Dictionary<string, object>>();
+            Dictionary<string, object> row;
+            foreach (DataRow dr in tblDayBook.Rows)
+            {
+                row = new Dictionary<string, object>();
+                foreach (DataColumn col in tblDayBook.Columns)
+                {
+                    row.Add(col.ColumnName, dr[col]);
+                }
+                rows.Add(row);
+                i++;
+            }
+            sql.SaveTimeCons("Dashboard", "LoadMasterGrid_YarnSaleSummary", "Function End");
+            return Json(serializer.Serialize(rows));
+        }
+
+
+        [HttpPost]
+        public ActionResult SaveReconcile()
+        {
+            // Checking no of files injected in Request object  
+            if (Request.Files.Count > 0)
+            {
+                try
+                {
+                    //  Get all files from Request object  
+                    HttpFileCollectionBase files = Request.Files;
+                    for (int i = 0; i < files.Count; i++)
+                    {
+                        //string path = AppDomain.CurrentDomain.BaseDirectory + "Uploads/";  
+                        //string filename = Path.GetFileName(Request.Files[i].FileName);  
+
+                        HttpPostedFileBase file = files[i];
+                        string fname;
+
+                        // Checking for Internet Explorer  
+                        if (Request.Browser.Browser.ToUpper() == "IE" || Request.Browser.Browser.ToUpper() == "INTERNETEXPLORER")
+                        {
+                            string[] testfiles = file.FileName.Split(new char[] { '\\' });
+                            fname = testfiles[testfiles.Length - 1];
+                        }
+                        else
+                        {
+                            fname = file.FileName;
+                        }
+                        string strPath = Server.MapPath("/AmsSaas\\") + "Images\\ReconcileImages\\" + fname;
+                        if (System.IO.File.Exists(strPath))
+                        {
+                            return Json("Please Change File Name");
+                        }
+                        else
+                        {
+                            file.SaveAs(strPath);
+                        }
+
+                            
+
+
+                    }
+                    // Returns message that successfully uploaded  
+                    return Json("File Uploaded Successfully!");
+                }
+                catch (Exception ex)
+                {
+                    return Json("Error occurred. Error details: " + ex.Message);
+                }
+            }
+            else
+            {
+                return Json("No files selected.");
+            }
+        }
+        [HttpPost]
+        public double OppBalance(string VDate, int drpCashId)
+        {
+            int clientid = sql.getClientId();
+            double Bal = 0;
+            var odate = VDate.Split('/');
+            DateTime vardate = new DateTime(Convert.ToInt32(odate[2]), Convert.ToInt32(odate[1]), Convert.ToInt32(odate[0])).AddDays(1);
+            string parmDate = vardate.Year + "-" + vardate.Month + "-" + vardate.Day;
+            parmDate = parmDate + " 00:00";
+            AMS_SAASEntities db = new AMS_SAASEntities();
+            var List = db.tblChartOfAccounts.Where(x => x.intSeqId == drpCashId && x.intClientId == clientid).FirstOrDefault();
+            string varOldAccount = List.varOldAccount;
+            string str = " spGetAccountBalanceDateWiseCons '" + parmDate + "','" + varOldAccount + "'," + sql.getCompanyId() + "," + sql.getClientId() + " ";
+            DataTable dt = sql.LoadData(str, "tblOpp");
+            if (dt.Rows.Count > 0)
+            {
+                Bal = Convert.ToInt32(dt.Rows[0]["bal"]);
+            }
+            return Bal;
+        }
+        [HttpPost]
+        public string SaveReconcileData(string filepath, string ReConAccId, string ReConDate, string ReConBal, string ReConDesc)
+        {
+            string path = "";
+            try
+            {
+                AMS_SAASEntities dataContext = new AMS_SAASEntities();
+                SqlClass sql = new SqlClass();
+                var odate = ReConDate.Split('/');
+                DateTime varOrderdate = new DateTime(Convert.ToInt32(odate[2]), Convert.ToInt32(odate[1]), Convert.ToInt32(odate[0]));
+
+                var fileName = Path.GetFileName(filepath);
+                path = Path.Combine("../Images/ReconcileImages", fileName);
+
+                tblReconcile tblRec = new tblReconcile();
+                tblRec.intSeqId = sql.getMaxID("tblReconcile","intSeqId");
+                tblRec.intAccId =Convert.ToInt32(ReConAccId);
+                tblRec.dtDated = varOrderdate;
+                tblRec.flBalance = float.Parse(ReConBal, CultureInfo.InvariantCulture.NumberFormat);
+                tblRec.varDesc = ReConDesc;
+                tblRec.varFile = path;
+                tblRec.intClientId = sql.getClientId();
+                tblRec.dtcreation = DateTime.Now;
+                tblRec.intCreatedBy = getCreatedby();
+                dataContext.tblReconciles.Add(tblRec);
+                dataContext.SaveChanges();
+            }
+            catch (Exception ex)
+            {
+                ex.Message.ToString();
+            }
+            return path;
+
+        }
+
+        [HttpPost]
+        public string UpdateReconcileData(tblReconcile tblRec, string Id,string filepath, string ReConAccId, string ReConDate, string ReConBal, string ReConDesc)
+        {
+            string path = "";
+            try
+            {
+                AMS_SAASEntities dataContext = new AMS_SAASEntities();
+                SqlClass sql = new SqlClass();
+                var odate = ReConDate.Split('/');
+                DateTime varOrderdate = new DateTime(Convert.ToInt32(odate[2]), Convert.ToInt32(odate[1]), Convert.ToInt32(odate[0]));
+
+                var fileName = Path.GetFileName(filepath);
+                path = Path.Combine("../Images/ReconcileImages", fileName);
+                int no = Convert.ToInt32(Id);
+                int clientid = sql.getClientId();
+                var List = dataContext.tblReconciles.Where(x => x.intSeqId == no && x.intClientId == clientid).FirstOrDefault();
+                //tblReconcile tblRec = new tblReconcile();
+
+              
+                List.intAccId = Convert.ToInt32(ReConAccId);  /* tblRec.intAccId =*/
+                List.dtDated = varOrderdate; // tblRec.dtDated = 
+                List.flBalance = float.Parse(ReConBal, CultureInfo.InvariantCulture.NumberFormat);
+                List.varDesc = ReConDesc;
+                List.varFile = path;
+                List.intClientId = sql.getClientId();
+                List.dtUpdation = DateTime.Now;
+                List.intUpdatedBy = getCreatedby();
+                //dataContext.tblReconciles.Add(tblRec);
+                dataContext.SaveChanges();
+                Log.saveLog("Reconcile Updated V# " + no, "", "Acc#" + ReConAccId);
+            }
+            catch (Exception ex)
+            {
+                ex.Message.ToString();
+            }
+            return "Updated Successfully.";
+
+        }
+        [HttpPost]
+        public string DeleteReconFunction(string Id)
+        {
+            if (Id != null)
+            {
+                using (AMS_SAASEntities dataContext = new AMS_SAASEntities())
+                {
+                    int clientid = sql.getClientId();
+                    int no = Convert.ToInt32(Id);
+                    var List = dataContext.tblReconciles.Where(x => x.intSeqId == no &&  x.intClientId == clientid).FirstOrDefault();
+                    //--Check Closing ---//
+                    var accno = List.intAccId;
+                    DateTime ParmDate = Convert.ToDateTime(List.dtDated);
+                    //bool flag = sql.GetClosingFlag(ParmDate);
+                    //if (flag == true)
+                    //{
+                    //    return sql.ShowClosingMsg();
+                    //}
+                    //--END---//
+                    dataContext.tblReconciles.Remove(List);
+                    dataContext.SaveChanges();
+
+                   
+                    Log.saveLog("Reconcile Delete V# " + no, "", "Acc#" + accno);
+                    return "Record Deleted Successfully";
+                }
+            }
+            else
+            {
+                return "Delete Fail";
+            }
+        }
+
+
+
+        [HttpPost]
+        public string DeleteFinancialClosing(string Vid)
+        {
+            if (Vid != null)
+            {
+                using (AMS_SAASEntities dataContext = new AMS_SAASEntities())
+                {
+                    int clientid = sql.getClientId();
+                    int no = Convert.ToInt32(Vid);
+                    var ListFinancial = dataContext.tblFinancialClosings.Where(x => x.intVoucherId == no && x.varRefType == "CL");
+                    //--Check Closing ---//
+
+                    var ListVoucherDetail = dataContext.tblVoucherDetails.Where(x => x.intVoucherId == no && x.varRefType == "CL");
+                    var ListVoucherMaster = dataContext.tblVoucherMasters.Where(x => x.varVoucherNo == no.ToString() && x.varVoucherType == "CL" && x.intSeqId== no);
+
+                    dataContext.tblFinancialClosings.RemoveRange(ListFinancial);
+                    dataContext.tblVoucherDetails.RemoveRange(ListVoucherDetail);
+                    dataContext.tblVoucherMasters.RemoveRange(ListVoucherMaster);
+
+                    dataContext.SaveChanges();
+
+
+                    Log.saveLog("tblFinancialClosings , tblVoucherDetails , tblVoucherMasters  Delete V# " + no, "", "Acc# Multiple" );
+                    return "Record Deleted Successfully";
+                }
+            }
+            else
+            {
+                return "Delete Fail";
+            }
+        }
+
+        [HttpPost]
+        public string isStock_Profit_PartnerDetailExist()
+        {
+            string message = "";
+
+            try
+            {
+                string str = "  select isnull(intProfitAccId,-1) as intProfitAccId, isnull(intStockAccId,-1) as intStockAccId,* from tblPreference where intclientid = " + sql.getClientId() + " ";
+                DataTable dtDrp = sql.LoadData(str, "tblPreference");
+                if (dtDrp.Rows.Count > 0)
+                {
+                    if(dtDrp.Rows[0]["intProfitAccId"].ToString()=="-1")
+                    {
+                        message = "Please enter Profit Account in Preference ";
+                    }
+                    if (dtDrp.Rows[0]["intStockAccId"].ToString() == "-1")
+                    {
+                        message = "Please enter Stock Account in Preference ";
+                    }
+                }
+
+                string strPartner = "   select * from  MCI.dbo.tblPartnersDetail where intcompanyid = " + sql.getClientId() + " ";
+                DataTable dtPartner = sql.LoadData(strPartner, "tblPartnersDetail");
+                if (dtPartner.Rows.Count == 0)
+                {
+                    message = "No data found in Partner ";
+                }
+
+                }catch(Exception e)
+            {
+                message = "Error";
+            }
+
+            return message;
+        }
+
+        [HttpPost]
+        public JsonResult EditFinancialClosing(string Vid)
+        {
+            using (AMS_SAASEntities dataContext = new AMS_SAASEntities())
+            {
+                int clientid = sql.getClientId();
+                int no = Convert.ToInt32(Vid);
+                var List = dataContext.tblFinancialClosings.Where(x => x.intVoucherId == no && x.intCompanyId == clientid && x.varRefType=="CL").FirstOrDefault();
+                return Json(List, JsonRequestBehavior.AllowGet);
+            }
+        }
+
+
+
+        [HttpPost]
+        public JsonResult EditReconcileFunction(string Id)
+        {
+            using (AMS_SAASEntities dataContext = new AMS_SAASEntities())
+            {
+                int clientid = sql.getClientId();
+                int no = Convert.ToInt32(Id);
+                var List = dataContext.tblReconciles.Where(x => x.intSeqId == no &&  x.intClientId == clientid).FirstOrDefault();
+                return Json(List, JsonRequestBehavior.AllowGet);
+            }
+        }
+        [HttpPost]
+        public JsonResult LoadAccountBalanceSummary(string dtFromDate,string dtToDate,string AccId)
+        {
+            int i = 0;
+            var fdate = dtFromDate.Split('/');
+            var tdate= dtToDate.Split('/');
+            string FirstDate= fdate[2].ToString() +"-"+ fdate[1].ToString() + "-" + fdate[0].ToString() + "  00:00:00";
+            string ToDate = tdate[2].ToString() + "-" + tdate[1].ToString() + "-" + tdate[0].ToString() + " 23:59:59";
+
+            if (ds.Tables["LoadAccountBalanceSummary"] != null)
+            {
+                ds.Tables["LoadAccountBalanceSummary"].Clear();
+            }
+            string str = @"Select IsNull(Opening,0) Opening,IsNull(Debit,0) Debit,IsNull(Credit,0) Credit, (IsNull(Opening,0)+IsNull(Debit,0))-IsNull(Credit,0) as Closing From(
+            Select 
+            (select Sum(flDebit)-Sum(flCredit) Opening from tblvouchermaster M
+            Inner join tblvoucherdetail D on 
+			D.intVoucherId=M.intSeqId and D.varRefType=M.varVoucherType and D.intCompanyId=M.intCompanyId 
+            and D.intFranchiseId=M.intFranchId  and M.intClientId=D.intClientId 
+            Where M.intclientid=" + sql.getClientId()+@" and M.dtVoucherDate<'"+ FirstDate + @"' and D.intAccountId="+AccId+ @"
+            ) as Opening,
+            (select Sum(flDebit) Debit from tblvouchermaster M
+            Inner join tblvoucherdetail D on 
+			D.intVoucherId=M.intSeqId and D.varRefType=M.varVoucherType and D.intCompanyId=M.intCompanyId 
+            and D.intFranchiseId=M.intFranchId  and M.intClientId=D.intClientId 
+            Where M.intclientid=" + sql.getClientId()+" and M.dtVoucherDate>='" + FirstDate + @"' and M.dtVoucherDate<'" + ToDate + @"' and D.intAccountId="+AccId+ @"
+            ) as Debit
+            ,
+            (select Sum(flCredit) Credit from tblvouchermaster M
+            Inner join tblvoucherdetail D on 
+			D.intVoucherId=M.intSeqId and D.varRefType=M.varVoucherType and D.intCompanyId=M.intCompanyId 
+            and D.intFranchiseId=M.intFranchId  and M.intClientId=D.intClientId 
+            Where M.intclientid=" + sql.getClientId()+ @" and M.dtVoucherDate>='" + FirstDate + @"' and M.dtVoucherDate<='" + ToDate + @"' and D.intAccountId="+AccId+@")
+            as Credit
+            )tbl"; 
+
+            DataTable dtDrp = sql.LoadData(str, "LoadAccountBalanceSummary");
+            System.Web.Script.Serialization.JavaScriptSerializer serializer = new System.Web.Script.Serialization.JavaScriptSerializer();
+            List<Dictionary<string, object>> rows = new List<Dictionary<string, object>>();
+            Dictionary<string, object> row;
+            foreach (DataRow dr in dtDrp.Rows)
+            {
+                row = new Dictionary<string, object>();
+                foreach (DataColumn col in dtDrp.Columns)
+                {
+                    row.Add(col.ColumnName, dr[col]);
+                }
+                rows.Add(row);
+                i++;
+            }
+            return Json(serializer.Serialize(rows));
+        }
+
+        [HttpPost]
+        public JsonResult LoadGrid_ClothLedger(string dtFromDate, string dtToDate, int ItemId)
+        {
+           // WeavingProdCompanyBaseEntities dataContext = new WeavingProdCompanyBaseEntities();
+            string parmsFdate = "";
+            string parmsTdate = "";
+            string parmsType = "NA";
+
+            var fdate = dtFromDate.Split('/');
+            parmsFdate = fdate[2] + "-" + fdate[1] + "-" + fdate[0];
+            var tdate = dtToDate.Split('/');
+            parmsTdate = tdate[2] + "-" + tdate[1] + "-" + tdate[0];
+
+            if (ds.Tables["tblItemLedger"] != null)
+            {
+                ds.Tables["tblItemLedger"].Clear();
+            }
+            string str = "  [WeavingProdCompanyBase].[dbo].[spProcessing_ItemLedger] '" + parmsFdate + "','" + parmsTdate + "'," + ItemId + "," + sql.getClientId() + " ";
+            //sql.LoadData(ref ds, str, "tblItemLedger");
+            DataTable dtDrp = sql.LoadData(str, "tblItemLedger");
+
+            int i = 0;
+            double RunningOppQty = 0;
+            double RunningOppAmnt = 0;
+            double RunningBlnceQty = 0;
+            double RunningBlnceAmnt = 0;
+            DataTable dtLoad = new DataTable();
+            string query = "";
+            System.Web.Script.Serialization.JavaScriptSerializer serializer = new System.Web.Script.Serialization.JavaScriptSerializer();
+            List<Dictionary<string, object>> rows = new List<Dictionary<string, object>>();
+            Dictionary<string, object> row;
+            foreach (DataRow dr in dtDrp.Rows)
+            {
+                row = new Dictionary<string, object>();
+                if (dtDrp.Rows[i]["VType"].ToString() == "Opp")
+                {
+                    if (Convert.ToDouble(dtDrp.Rows[i]["SaleConsAmount"]) < 0 || Convert.ToDouble(dtDrp.Rows[i]["SaleConsAmount"]) == 0)
+                    {
+                        RunningBlnceQty = RunningBlnceQty + (Convert.ToDouble(dtDrp.Rows[i]["InQty"]) +
+                        Convert.ToDouble(dtDrp.Rows[i]["OutQty"]));
+                        RunningOppQty = RunningBlnceQty;
+                        RunningBlnceAmnt = RunningBlnceAmnt + (Convert.ToDouble(dtDrp.Rows[i]["InAmount"]) +
+                      Convert.ToDouble(dtDrp.Rows[i]["SaleConsAmount"]));
+                        RunningOppAmnt = RunningBlnceAmnt;
+                    }
+                    if (Convert.ToDouble(dtDrp.Rows[i]["OutQty"]) > 0)
+                    {
+                        RunningBlnceQty = RunningBlnceQty + (Convert.ToDouble(dtDrp.Rows[i]["InQty"]) -
+                        Convert.ToDouble(dtDrp.Rows[i]["OutQty"]));
+                        RunningOppQty = RunningBlnceQty;
+                        RunningBlnceAmnt = RunningBlnceAmnt + (Convert.ToDouble(dtDrp.Rows[i]["InAmount"]) -
+                      Convert.ToDouble(dtDrp.Rows[i]["SaleConsAmount"]));
+                        RunningOppAmnt = RunningBlnceAmnt;
+                    }
+                }
+                else
+                {
+                    RunningBlnceQty = RunningBlnceQty + (Convert.ToDouble(dtDrp.Rows[i]["InQty"]) -
+                       Convert.ToDouble(dtDrp.Rows[i]["OutQty"]));
+
+                    RunningBlnceAmnt = RunningBlnceAmnt + (Convert.ToDouble(dtDrp.Rows[i]["InAmount"]) -
+                      Convert.ToDouble(dtDrp.Rows[i]["SaleConsAmount"]));
+                }
+
+
+                row.Add("RunningBlnceQty", RunningBlnceQty);
+                row.Add("RunningOppQty", RunningOppQty.ToString("N0"));
+                row.Add("RunningBlnceAmnt", RunningBlnceAmnt);
+                row.Add("RunningOppAmnt", RunningOppAmnt.ToString("N0"));
+
+                foreach (DataColumn col in dtDrp.Columns)
+                {
+                    row.Add(col.ColumnName, dr[col]);
+                }
+                rows.Add(row);
+                i++;
+            }
+            return Json(serializer.Serialize(rows));
+        }
+
+
+        [HttpPost]
+        public JsonResult LoadGrid_Issues()
+        {
+            int i = 0;
+            if (ds.Tables["Issues"] != null)
+            {
+                ds.Tables["Issues"].Clear();
+            }
+            string str = " spLoadGridIssues " + sql.getClientId() + " ";
+            DataTable dtDrp = sql.LoadData(str, "Issues");
+            System.Web.Script.Serialization.JavaScriptSerializer serializer = new System.Web.Script.Serialization.JavaScriptSerializer();
+            List<Dictionary<string, object>> rows = new List<Dictionary<string, object>>();
+            Dictionary<string, object> row;
+            foreach (DataRow dr in dtDrp.Rows)
+            {
+                row = new Dictionary<string, object>();
+                foreach (DataColumn col in dtDrp.Columns)
+                {
+                    row.Add(col.ColumnName, dr[col]);
+                }
+                rows.Add(row);
+                i++;
+            }
+            return Json(serializer.Serialize(rows));
+        }
+
+        [HttpPost]
+        public JsonResult LoadWatchList(string Option)
+        {
+            sql.SaveTimeCons("Dashboard", "LoadWatchList", "Function Starting");
+            // HotelManagementEntities dataContext = new HotelManagementEntities();
+            AMS_SAASEntities MCILedger = new AMS_SAASEntities();
+            sql = new SqlClass();
+
+            DateTime dtTo = DateTime.Now;
+            DateTime parmsFdate = DateTime.Now.AddDays(-7);
+            DateTime PreviousDayfrom = DateTime.Now;
+            Balances Bal = new Balances();
+            AMS_SAASEntities db = new AMS_SAASEntities();
+            int ClientId = sql.getClientId();
+            string str2 = " ";
+
+            if (Option == "week")
+            {
+                dtTo = DateTime.Now;
+                parmsFdate = DateTime.Now.AddDays(-7);
+                PreviousDayfrom = parmsFdate.AddDays(-1);
+            }
+            else
+            {
+                DateTime dtCurrent = DateTime.Now;
+                parmsFdate = dtCurrent.AddMonths(-1);
+                PreviousDayfrom = parmsFdate.AddDays(-1);
+                dtTo = DateTime.Now;
+               
+            }
+
+
+            if (ds.Tables["tblAccountLedgerOP"] != null)
+            {
+                ds.Tables["tblAccountLedgerOP"].Clear();
+            }
+                
+
+            string str = " ";
+            str = " spGetWatchList @companyId ="+ ClientId + ",@fromDate = '"+ parmsFdate.ToString("yyyy-MM-dd") + " 00:00:00',@toDate = '"+ dtTo.ToString("yyyy-MM-dd") + " 23:23:59',@previousDate = '" + PreviousDayfrom.ToString("yyyy-MM-dd") + " 23:23:59' ";
+
+            //  sql = new SqlClass();
+
+
+            DataTable tblAccountLedger = sql.LoadData(str, "tbl");
+    
+
+      
+            int i = 0;
+            System.Web.Script.Serialization.JavaScriptSerializer serializer = new System.Web.Script.Serialization.JavaScriptSerializer();
+            List<Dictionary<string, object>> rows = new List<Dictionary<string, object>>();
+            Dictionary<string, object> row;
+            foreach (DataRow dr in tblAccountLedger.Rows)
+            {
+                row = new Dictionary<string, object>();
+                double credit = Convert.ToDouble(dr["flCredit"]);
+                double debit = Convert.ToDouble(dr["flDebit"]);
+              
+                if (credit > 0 || debit > 0)
+                {
+                    row.Add("Id", i);
+               
+                foreach (DataColumn col in tblAccountLedger.Columns)
+                {
+                    row.Add(col.ColumnName, dr[col]);
+                }
+                rows.Add(row);
+                }
+                i++;
+            }
+            sql.SaveTimeCons("Dashboard", "LoadWatchList", "Function End");
+            return Json(serializer.Serialize(rows));
+           
+        }
+
+        public JsonResult DashBordAccountsDetail(string dtFromDate, string HeadAcc, int pid=-1)
+        {
+            Balances Bal = new Balances();
+            AMS_SAASEntities db = new AMS_SAASEntities();
+            var dtfdate = dtFromDate.Split('/');
+            string parmsFdate = dtfdate[2] + "-" + dtfdate[1] + "-" + dtfdate[0];
+            parmsFdate += " 23:59:59";
+            int cid = sql.getClientId();
+            int ParentId = -1;
+            System.Web.Script.Serialization.JavaScriptSerializer serializer = new System.Web.Script.Serialization.JavaScriptSerializer();
+            if (HeadAcc=="CASH")
+            {
+                ParentId =Convert.ToInt32(db.tblPreferences.Where(x => x.intClientId == cid).Select(x => x.intCashAccId).FirstOrDefault());
+            }
+            else if (HeadAcc=="BANK")
+            {
+                ParentId = Convert.ToInt32(db.tblPreferences.Where(x => x.intClientId == cid).Select(x => x.intBankAccId).FirstOrDefault());
+            }
+            //else if (HeadAcc == "DEBTOR")
+            //{
+            //  //  ParentId = Convert.ToInt32(db.tblPreferences.Where(x => x.intClientId == cid).Select(x => x.intTradeDebt).FirstOrDefault());
+            //}
+            //else if (HeadAcc == "CREDITOR")
+            //{
+            //    ParentId = Convert.ToInt32(db.tblPreferences.Where(x => x.intClientId == cid).Select(x => x.intTradeCredit).FirstOrDefault());
+            //}
+            else if (HeadAcc == "DEBTOR")
+            {
+                //AccountHomeController AccHome = new AccountHomeController();
+                //AccHome.LoadBalnceSheetAssetGrid(parmsFdate);
+                // LoadBalnceSheetAssetGrid()
+                List<spGetAccBalBtDtIsOpAstLblty_Result> BalList = db.Database.SqlQuery<spGetAccBalBtDtIsOpAstLblty_Result>("spGetAccBalBtDtIsOpAstLblty '2001-01-01','" + parmsFdate + "'," + sql.getCompanyId() + "," + -2 + "," + sql.getClientId()).ToList();
+            //    Bal.Debtors = Convert.ToDouble(BalList.Where(x => x.bal > 0).Sum(x => x.bal));
+
+              
+
+                return Json(serializer.Serialize(BalList.Where(x=>x.Bal>0)));
+                //  ParentId = Convert.ToInt32(db.tblPreferences.Where(x => x.intClientId == cid).Select(x => x.intTradeDebt).FirstOrDefault());
+            }
+            else if (HeadAcc == "CREDITOR")
+            {
+                List<spGetAccBalBtDtIsOpAstLblty_Result> BalList = db.Database.SqlQuery<spGetAccBalBtDtIsOpAstLblty_Result>("spGetAccBalBtDtIsOpAstLblty '2001-01-01','" + parmsFdate + "'," + sql.getCompanyId() + "," + -2 + "," + sql.getClientId()).ToList();
+                //  Bal.Creditors = Convert.ToDouble(BalList.Where(x => x.bal < 0).Sum(x => x.bal));
+                //return Json(Bal, JsonRequestBehavior.AllowGet);
+                // ParentId = Convert.ToInt32(db.tblPreferences.Where(x => x.intClientId == cid).Select(x => x.intTradeCredit).FirstOrDefault());
+            }
+            else
+            {
+                ParentId = pid;
+            }
+
+           
+         
+            sql = new SqlClass();
+            string varOldAccount = db.tblChartOfAccounts.FirstOrDefault(x => x.intSeqId == ParentId).varOldAccount.ToString();
+            string str = " spGetAccountBalancesByParentId '" + parmsFdate + "','" + ParentId + "'," + sql.getClientId();
+            DataTable dtLoad = sql.LoadData(str, "spGetAccountBalancesByParentId");
+         
+            List<Dictionary<string, object>> rows = new List<Dictionary<string, object>>();
+            Dictionary<string, object> row;
+            foreach (DataRow dr in dtLoad.Rows)
+            {
+                row = new Dictionary<string, object>();
+                foreach (DataColumn col in dtLoad.Columns)
+                {
+                    row.Add(col.ColumnName, dr[col]);
+                }
+                rows.Add(row);
+            }
+            return Json(serializer.Serialize(rows));
+        }
+
+        public JsonResult DashBordAccountsDetailPopUps(string dtFromDate, string HeadAcc, string chkCrePos, string chkDebNeg, int pid = -1)
+        {
+            Balances Bal = new Balances();
+            AMS_SAASEntities db = new AMS_SAASEntities();
+            var dtfdate = dtFromDate.Split('/');
+            string parmsFdate = dtfdate[2] + "-" + dtfdate[1] + "-" + dtfdate[0];
+            parmsFdate += " 23:59:59";
+            int cid = sql.getClientId();
+            int ParentId = -1;
+            sql = new SqlClass();
+
+            var isNotCreDebPosNegCombine = db.tblCompanies.FirstOrDefault(x => x.intClientId == cid).isNotCreDebPosNegCombine.ToString();
+
+            if(isNotCreDebPosNegCombine=="")
+            {
+                isNotCreDebPosNegCombine = "True";
+            }
+
+            System.Web.Script.Serialization.JavaScriptSerializer serializer = new System.Web.Script.Serialization.JavaScriptSerializer();
+            if (HeadAcc == "CASH")
+            {
+                ParentId = Convert.ToInt32(db.tblPreferences.Where(x => x.intClientId == cid).Select(x => x.intCashAccId).FirstOrDefault());
+            }
+            else if (HeadAcc == "BANK")
+            {
+                ParentId = Convert.ToInt32(db.tblPreferences.Where(x => x.intClientId == cid).Select(x => x.intBankAccId).FirstOrDefault());
+            }
+            //else if (HeadAcc == "DEBTOR")
+            //{
+            //  //  ParentId = Convert.ToInt32(db.tblPreferences.Where(x => x.intClientId == cid).Select(x => x.intTradeDebt).FirstOrDefault());
+            //}
+            //else if (HeadAcc == "CREDITOR")
+            //{
+            //    ParentId = Convert.ToInt32(db.tblPreferences.Where(x => x.intClientId == cid).Select(x => x.intTradeCredit).FirstOrDefault());
+            //}
+            else if (HeadAcc == "DEBTOR")
+            {
+                //AccountHomeController AccHome = new AccountHomeController();
+                //AccHome.LoadBalnceSheetAssetGrid(parmsFdate);
+                // LoadBalnceSheetAssetGrid()
+                //    Bal.Debtors = Convert.ToDouble(BalList.Where(x => x.bal > 0).Sum(x => x.bal));
+                //code start 
+
+                if(isNotCreDebPosNegCombine=="False")
+                {
+                    string debterId = db.tblPreferences.FirstOrDefault(x => x.intClientId == cid).intTradeDebt.ToString();
+                    string strDeb = " spGetAccountBalancesByParentId '" + parmsFdate + "','" + debterId + "'," + sql.getClientId();
+                    DataTable dtLoadDeb = sql.LoadData(strDeb, "spGetAccountBalancesByParentId");
+
+                  
+                    DataTable dtNegative = new DataTable();
+                    dtNegative = dtLoadDeb.Clone();
+                    DataRow[] drOne;
+
+                    drOne = dtLoadDeb.Select("Bal<0");
+
+                    foreach (DataRow drr in drOne)
+                    {
+                        dtNegative.ImportRow(drr);
+                    }
+
+                    if(chkDebNeg=="true")
+                    {
+                        List<Dictionary<string, object>> rowsDeb = new List<Dictionary<string, object>>();
+                        Dictionary<string, object> rowDeb;
+                        foreach (DataRow dr in dtNegative.Rows)
+                        {
+                            rowDeb = new Dictionary<string, object>();
+                            foreach (DataColumn col in dtNegative.Columns)
+                            {
+                                rowDeb.Add(col.ColumnName, dr[col]);
+                            }
+                            rowsDeb.Add(rowDeb);
+                        }
+                        return Json(serializer.Serialize(rowsDeb));
+                    }
+                    else
+                    {
+                        List<Dictionary<string, object>> rowsDeb = new List<Dictionary<string, object>>();
+                        Dictionary<string, object> rowDeb;
+                        foreach (DataRow dr in dtLoadDeb.Rows)
+                        {
+                            rowDeb = new Dictionary<string, object>();
+                            foreach (DataColumn col in dtLoadDeb.Columns)
+                            {
+                                rowDeb.Add(col.ColumnName, dr[col]);
+                            }
+                            rowsDeb.Add(rowDeb);
+                        }
+                        return Json(serializer.Serialize(rowsDeb));
+                    }
+
+                
+                }
+                //code end here
+                else
+                {
+                    List<spGetAccBalBtDtIsOpAstLblty_Result> BalList = db.Database.SqlQuery<spGetAccBalBtDtIsOpAstLblty_Result>("spGetAccBalBtDtIsOpAstLblty '2001-01-01','" + parmsFdate + "'," + sql.getCompanyId() + "," + -2 + "," + sql.getClientId()).ToList();
+                    return Json(serializer.Serialize(BalList.Where(x => x.Bal > 0)));
+                }
+
+               
+                //  ParentId = Convert.ToInt32(db.tblPreferences.Where(x => x.intClientId == cid).Select(x => x.intTradeDebt).FirstOrDefault());
+            }
+            else if (HeadAcc == "CREDITOR")
+            {
+
+                if (isNotCreDebPosNegCombine == "False")
+                {
+                    string creId = db.tblPreferences.FirstOrDefault(x => x.intClientId == cid).intTradeCredit.ToString();
+                    string strDeb = " spGetAccountBalancesByParentId '" + parmsFdate + "','" + creId + "'," + sql.getClientId();
+                    DataTable dtLoadCre = sql.LoadData(strDeb, "spGetAccountBalancesByParentId");
+
+                    DataTable dtPos = new DataTable();
+                    dtPos = dtLoadCre.Clone();
+                    DataRow[] drOne;
+
+                    drOne = dtLoadCre.Select("Bal>0");
+
+                    foreach (DataRow drr in drOne)
+                    {
+                        dtPos.ImportRow(drr);
+                    }
+
+                    if (chkCrePos == "true")
+                    {
+                        List<Dictionary<string, object>> rowsCre = new List<Dictionary<string, object>>();
+                        Dictionary<string, object> rowCre;
+                        foreach (DataRow dr in dtPos.Rows)
+                        {
+                            rowCre = new Dictionary<string, object>();
+                            foreach (DataColumn col in dtPos.Columns)
+                            {
+                                rowCre.Add(col.ColumnName, dr[col]);
+                            }
+                            rowsCre.Add(rowCre);
+                        }
+                        return Json(serializer.Serialize(rowsCre));
+                    }
+                    else
+                    {
+                        List<Dictionary<string, object>> rowsCre = new List<Dictionary<string, object>>();
+                        Dictionary<string, object> rowCre;
+                        foreach (DataRow dr in dtLoadCre.Rows)
+                        {
+                            rowCre = new Dictionary<string, object>();
+                            foreach (DataColumn col in dtLoadCre.Columns)
+                            {
+                                rowCre.Add(col.ColumnName, dr[col]);
+                            }
+                            rowsCre.Add(rowCre);
+                        }
+                        return Json(serializer.Serialize(rowsCre));
+                    }
+                }
+                //code end here
+                else
+                {
+                    List<spGetAccBalBtDtIsOpAstLblty_Result> BalList = db.Database.SqlQuery<spGetAccBalBtDtIsOpAstLblty_Result>("spGetAccBalBtDtIsOpAstLblty '2001-01-01','" + parmsFdate + "'," + sql.getCompanyId() + "," + -2 + "," + sql.getClientId()).ToList();
+                    //  Bal.Creditors = Convert.ToDouble(BalList.Where(x => x.bal < 0).Sum(x => x.bal));
+                    return Json(serializer.Serialize(BalList.Where(x => x.Bal < 0)));
+                }
+                //return Json(Bal, JsonRequestBehavior.AllowGet);
+                // ParentId = Convert.ToInt32(db.tblPreferences.Where(x => x.intClientId == cid).Select(x => x.intTradeCredit).FirstOrDefault());
+            }
+            else
+            {
+                ParentId = pid;
+            }
+
+
+
+          
+            string varOldAccount = db.tblChartOfAccounts.FirstOrDefault(x => x.intSeqId == ParentId).varOldAccount.ToString();
+            string str = " spGetAccountBalancesByParentId '" + parmsFdate + "','" + ParentId + "'," + sql.getClientId();
+            DataTable dtLoad = sql.LoadData(str, "spGetAccountBalancesByParentId");
+
+            List<Dictionary<string, object>> rows = new List<Dictionary<string, object>>();
+            Dictionary<string, object> row;
+            foreach (DataRow dr in dtLoad.Rows)
+            {
+                row = new Dictionary<string, object>();
+                foreach (DataColumn col in dtLoad.Columns)
+                {
+                    row.Add(col.ColumnName, dr[col]);
+                }
+                rows.Add(row);
+            }
+            return Json(serializer.Serialize(rows));
+        }
+
+
+
+        [HttpPost]
+        public JsonResult LoadAllDataSale(string txtSearch, string FromDate, string ToDate, string Postunpost = "-1")
+
+
+        {
+            int i = 0;
+            string varwhere = " and 0=0";
+            if (txtSearch != null)
+            {
+                if (txtSearch != "")
+                {
+                    varwhere += " and ( S.varBFirstName like '%" + txtSearch + "%' OR  S.varBLastName like '%" + txtSearch + "%' OR M.varVoucher = '" + txtSearch + "' ) ";
+                }
+            }
+            if (TempData["PostChk"] != null)
+            {
+                Postunpost = "0";
+            }
+            string sqlFdate = "";
+            string sqlTdate = "";
+            if ((FromDate != null) && (ToDate != null))
+            {
+                if ((FromDate != "") && (ToDate != ""))
+                {
+                    var FDate = FromDate.Split('/');
+                    var TDate = ToDate.Split('/');
+                    sqlFdate = FDate[2] + "-" + FDate[1] + "-" + FDate[0];
+                    sqlTdate = TDate[2] + "-" + TDate[1] + "-" + TDate[0];
+
+                    varwhere += " and (Convert(date,M.dtVoucherDate) >= '" + sqlFdate + "' and Convert(date,M.dtVoucherDate) <= '" + sqlTdate + "' ) ";
+                }
+            }
+
+            varwhere += " and M.intcompanyId='" + sql.getClientId() + "'";
+            if (ds.Tables["tblMaster"] != null)
+            {
+                ds.Tables["tblMaster"].Clear();
+            }
+            string query = "select (M.intSeqId) SeqID,(M.dtVoucherDate) vdate,(M.varVoucher) vno,(isnull(varBFirstName,'')+' '+isnull(varBLastName,'')) Supplier,(M.varRef) ref,count(isnull(D.intSeqId,0)) itmqty,sum(isnull(D.flQty,0)) ttlQty,";
+            query += " isnull(sum(D.flQty * D.flPrice),0) amount,isnull(M.flnetAmount,0) as NetAmount,sum(isnull(D.flDiscount,0)) disc,M.dtCreationDate CDate,isnull(M.intAccVId,-1) intAccVId,M.varAccVType,S.intSeqiD SuppID from tblStockMaster M ";
+            query += " left join tblStockDetail D on d.intVoucherID = M.intSeqId and D.intCompanyId= M.intCompanyId and d.vartype=M.vartype ";
+            query += " left join tblItem I on I.intItemId = D.intItemId and I.intCompanyId = D.intCompanyid";
+            query += " left join tblCustomerAndSupplier S on S.intSeqId = M.intVendor and S.intCompanyId = M.intCompanyId";
+            query += " where I.intCategoryId=4 and M.varType='SV' and M.intCompanyId=" + sql.getClientId() + varwhere + " ";
+            query += " group by  M.flnetAmount,S.varBFirstName,S.varBLastName,S.intSeqiD,M.dtVoucherDate,M.intSeqId,M.varVoucher,M.varRef,M.dtCreationDate,M.intAccVId,M.varAccVType  order by M.dtVoucherDate Asc ";
+            DataTable tblMaster= sql.LoadDataWeaving(query, "tblMaster");
+
+            // -- Posting Code Start here -- //
+            var client = new WebClient();
+            string APIPath = "/ApiApp/PostingApi/GetVouchers/" + sql.getClientId() + "/SV/Processing_SV/" + sqlFdate + "/" + sqlTdate + "";
+            string url = ConfigurationManager.AppSettings["Accounts"] + APIPath + "";
+            var content = client.DownloadString(url);
+            List<DropDown> JsonResultAPI = JsonConvert.DeserializeObject<List<DropDown>>(content);
+
+            int dsLength = tblMaster.Columns.Count + 1;
+            tblMaster.Columns.Add("varVType", typeof(string));
+            tblMaster.Columns.Add("intVDetail", typeof(string));
+            tblMaster.Columns.Add("ImgVDetail", typeof(string));
+            tblMaster.AcceptChanges();
+            //Getting Opening Date
+            var client2 = new WebClient();
+            string APIPath2 = "/ApiApp/PostingApi/GetOpeningDate/" + sql.getClientId() + "";
+            string url2 = ConfigurationManager.AppSettings["Accounts"] + APIPath2 + "";
+            var content2 = client.DownloadString(url2);
+
+            string APIPathUserRIght = "/ApiApp/UserRightsAPI/loadUserAllowPages/" + sql.getClientId() + "/" + sql.getCreatedBy() + ""; //"/ApiApp/PostingApi/AccountBalances/" + sql.getCompanyId() + "";
+            string APIPathUserRIghtURL = ConfigurationManager.AppSettings["AhsanIkram"] + APIPathUserRIght + "";
+            var Results = client.DownloadString(APIPathUserRIghtURL);
+            string[] ArrayOfRights = Results.Replace("}", "").Replace("{", "").Replace("\"", "").Split(',');
+            if (Array.IndexOf(ArrayOfRights, "YarnSaleAutoPost:false") > 0)
+            {
+
+
+
+                var dtopp = content2;
+                foreach (DataRow item in tblMaster.Rows)
+                {
+                    var tblDetail = (from a in JsonResultAPI
+                                     where a.id == Convert.ToInt32(item["intAccVId"]) && a.Name == item["varAccVType"].ToString()
+                                     select a.id).FirstOrDefault();
+                    if (Convert.ToDateTime(item["CDate"]).Date < Convert.ToDateTime(dtopp.Replace("\"", "")))
+                    {
+                        item["ImgVDetail"] = "";
+                        //item[dsLength - 1] = "";
+                    }
+                    else
+                    {
+                        if (item["amount"].ToString() != "")
+                        {
+                            if (Convert.ToInt32(item["amount"]) != 0)
+                            {
+                                if (tblDetail > 0)
+                                {
+                                    item["ImgVDetail"] = "../Images/Notok.png";
+                                    item["intVDetail"] = 1;
+                                    item["varVType"] = item["SeqID"];
+                                }
+                                else
+                                {
+                                    item["ImgVDetail"] = "../Images/OK.png";
+                                    item["intVDetail"] = 0;
+                                }
+                            }
+                            else
+                            {
+                                item["ImgVDetail"] = "";
+                                item["intVDetail"] = 2;
+                            }
+                        }
+                        else
+                        {
+                            //Zero Amount Values
+                            item["ImgVDetail"] = "";
+                            item["intVDetail"] = 2;
+                        }
+                    }
+                    tblMaster.AcceptChanges();
+
+                }
+            }
+            else
+            {
+                foreach (DataRow item in tblMaster.Rows)
+                {
+                    item["ImgVDetail"] = "";
+                    item["intVDetail"] = 2;
+                    tblMaster.AcceptChanges();
+                }
+            }
+            //Load posted and un-posted records
+            DataTable dtFilteredrows = new DataTable(); //ds.Tables["OrderMgmtCopy"];
+            dtFilteredrows = tblMaster.Clone();
+            dtFilteredrows.AcceptChanges();
+            DataView dv1 = tblMaster.DefaultView;
+            dv1.RowFilter = " intVDetail = 0 or intVDetail = 2 ";
+            dtFilteredrows = dv1.ToTable();
+
+            //-- End here --//
+
+
+            System.Web.Script.Serialization.JavaScriptSerializer serializer = new System.Web.Script.Serialization.JavaScriptSerializer();
+            List<Dictionary<string, object>> rows = new List<Dictionary<string, object>>();
+            Dictionary<string, object> row;
+            foreach (DataRow dr in dtFilteredrows.Rows)
+            {
+                row = new Dictionary<string, object>();
+                foreach (DataColumn col in dtFilteredrows.Columns)
+                {
+                    row.Add(col.ColumnName, dr[col]);
+                }
+                rows.Add(row);
+                i++;
+            }
+            return Json(serializer.Serialize(rows));
+        }
+
+
+
+
+        [HttpPost]
+        public JsonResult AllReconcileRecords()
+        {
+            int i = 0;
+           
+            if (ds.Tables["tblMaster"] != null)
+            {
+                ds.Tables["tblMaster"].Clear();
+            }
+            string query = "";
+            query += " select R.intSeqId,C.varTitle,R.flBalance,R.varDesc,CONVERT(varchar,R.dtDated,103) as dtDate from tblReconcile R  ";
+            query += " left join tblChartOfAccount C on C.intSeqId=R.intAccId and C.intClientId=R.intClientId ";
+            query += " where R.intclientid="+sql.getClientId();
+            DataTable dtLoad = sql.LoadData(query, "tblMaster");
+            //bll.loadData(ref ds, query, "tblMaster");
+
+            System.Web.Script.Serialization.JavaScriptSerializer serializer = new System.Web.Script.Serialization.JavaScriptSerializer();
+            List<Dictionary<string, object>> rows = new List<Dictionary<string, object>>();
+            Dictionary<string, object> row;
+            foreach (DataRow dr in dtLoad.Rows)
+            {
+                row = new Dictionary<string, object>();
+                foreach (DataColumn col in dtLoad.Columns)
+                {
+                    row.Add(col.ColumnName, dr[col]);
+                }
+                rows.Add(row);
+                i++;
+            }
+            return Json(serializer.Serialize(rows));
+
+
+        }
+
+
+
+        [HttpPost]
+        public JsonResult CategoryList_Category(string Id)
+        {
+            try
+            {
+                using (AMS_SAASEntities dataContext = new AMS_SAASEntities())
+                {
+                    int no = Convert.ToInt32(Id);
+                    int CId = sql.getClientId();
+                    var List = dataContext.tblFinancialClosings.Where(x => x.intCompanyId == CId).ToList();
+                    return Json(List, JsonRequestBehavior.AllowGet);
+                }
+            }
+            catch (Exception ex)
+            {
+                return Json(ex.Message.ToString());
+            }
+        }
+
+
+
+        public string ProfitLossFinancialTransection(string dtFromDate, string dtToDate,string txtDesc)
+        {
+            //string dtFromDate = "01/01/2018";
+            //    string dtToDate="01/01/2019";
+            //string dtFromDate="01/01/2018", dtToDate="01/01/2019";
+
+
+
+          
+            // start code of master and details record save 
+
+            Balances Bal = new Balances();
+            AMS_SAASEntities db = new AMS_SAASEntities();
+
+            var dtfdate = dtFromDate.Split('/');
+            var dttdate = dtToDate.Split('/');
+            int cid = sql.getClientId();
+            int ParentId = -1;
+            int clientid = cid;
+            int voucherMaxid = -1;
+            var odate = dtToDate.Split('/');
+            DateTime varOrderdate = new DateTime(Convert.ToInt32(odate[2]), Convert.ToInt32(odate[1]), Convert.ToInt32(odate[0]));
+            //--Check Closing ---//
+
+
+            var fromdate = dtFromDate.Split('/');
+            DateTime frdate = new DateTime(Convert.ToInt32(fromdate[2]), Convert.ToInt32(fromdate[1]), Convert.ToInt32(fromdate[0]));
+
+
+            DateTime ParmDate = varOrderdate;
+
+           
+
+            string parmsFdate = dtfdate[2] + "-" + dtfdate[1] + "-" + dtfdate[0];
+            string parmsTdate = dttdate[2] + "-" + dttdate[1] + "-" + dttdate[0];
+            string apiparmsFDate = parmsFdate;
+            string apiparmsTDate = parmsTdate;
+
+            string fdate = apiparmsFDate; //Convert.ToDateTime(apiparmsFDate).AddDays(-1).ToString("yyyy-MM-dd");
+            //var abc = fdate.Split('/');
+            //string parmsFdate2 = abc[2] + "-" + abc[1] + "-" + abc[0];
+            parmsFdate += " 00:00:00";
+            parmsTdate += " 23:59:59";
+            //sql = new SqlClass();
+            //  string varOldAccount = db.tblChartOfAccounts.FirstOrDefault(x => x.intSeqId == ParentId).varOldAccount.ToString();
+            PLAllClasses ProfitClass = new PLAllClasses();
+         //   int clientid = sql.getClientId();
+            int PurchaseAcc = Convert.ToInt32(db.tblPreferences.Where(x => x.intClientId == clientid).Select(x => x.intPurchaseAccId).FirstOrDefault().ToString());
+
+            int stockId = Convert.ToInt32(db.tblPreferences.Where(x => x.intClientId == clientid).Select(x => x.intStockAccId).FirstOrDefault().ToString());
+
+            int profitAccId = Convert.ToInt32(db.tblPreferences.Where(x => x.intClientId == clientid).Select(x => x.intProfitAccId).FirstOrDefault().ToString());
+
+            // decimal purParent=Convert.ToInt32(db.tblChartOfAccounts.Where(x=>x.intClientId==clientid && x.intSeqId==PurchaseAcc).Select(x=>x.intParentAccountId).FirstOrDefault().ToString());
+            string purParentAccNo = db.tblChartOfAccounts.Where(x => x.intSeqId == PurchaseAcc && x.intClientId == clientid).Select(x => x.varAccountNo).FirstOrDefault().ToString();
+            purParentAccNo = purParentAccNo + "-";
+
+            string strPurchase = @"select vartitle,varaccountno,isoperative,varOldAccount,sum(bal) as bal  from (
+            select A.intSeqId,varOldAccount,vartitle,varaccountno,isoperative,
+            (isnull((select sum(C.flDebit) - sum(C.flCredit)
+            from tblVoucherMaster M inner
+            join tblVoucherDetail C  on C.intVoucherId = M.intSeqId
+            and C.varRefType = M.varVoucherType and C.intCompanyId = M.intCompanyId and C.intFranchiseId = M.intFranchId
+            and M.intClientId = C.intClientId
+            inner join tblChartOfAccount B
+            on B.intSeqId = C.intAccountId and C.intCompanyId = B.intCompanyId and C.intFranchiseId = B.intCountryId
+            and M.intClientId = B.intClientId
+            where B.varAccountNo like A.varAccountNo + '%'
+            and isnull(isposted, 1) =case isnull(isposted, 1) when - 1 then isnull(isposted, 1) else 1 end
+            and dtVoucherDate >= '" + parmsFdate + @"' and dtVoucherDate < '" + parmsTdate + @"'
+            and M.intClientId = " + sql.getClientId() + @"
+            ),0) )
+             as bal
+            from tblChartOfAccount A
+            Where A.intClientId = " + sql.getClientId() + @"
+            ) as tb
+            where varAccountNo like '" + purParentAccNo + "%'  ";
+
+            //if (sql.getClientId() == 7)
+            //{
+            //    strPurchase += " or varAccountNo like '02-01-04-%' ";
+            //}
+            strPurchase += " and isoperative=1 group by varOldAccount,vartitle,varaccountno,isoperative";
+
+
+            ProfitClass.PurchaseAccounts = db.Database.SqlQuery<PLClass>(strPurchase).ToList();
+
+            string strSale = @"select vartitle,varaccountno,isoperative,varOldAccount,sum(bal) as bal ,max(tb.intseqid) as AccId from (
+            select A.intSeqId,varOldAccount,vartitle,varaccountno,isoperative,
+            (isnull((select  sum(C.flCredit) - sum(C.flDebit) 
+            from tblVoucherMaster M inner
+            join tblVoucherDetail C  on C.intVoucherId = M.intSeqId
+            and C.varRefType = M.varVoucherType and C.intCompanyId = M.intCompanyId and C.intFranchiseId = M.intFranchId
+            and M.intClientId = C.intClientId
+            inner join tblChartOfAccount B
+            on B.intSeqId = C.intAccountId and C.intCompanyId = B.intCompanyId and C.intFranchiseId = B.intCountryId
+            and M.intClientId = B.intClientId
+            where B.varAccountNo like A.varAccountNo + '%'
+            and isnull(isposted, 1) =case isnull(isposted, 1) when - 1 then isnull(isposted, 1) else 1 end
+            and dtVoucherDate >= '" + parmsFdate + @"' and dtVoucherDate < '" + parmsTdate + @"'
+            and M.intClientId = " + sql.getClientId() + @"
+            ),0) )
+             as bal
+            from tblChartOfAccount A
+            Where A.intClientId = " + sql.getClientId() + @"
+            ) as tb
+            where varaccountno like '%05-01-%' and isoperative=1
+            group by varOldAccount,vartitle,varaccountno,isoperative";
+
+          ProfitClass.RevenueAccounts = db.Database.SqlQuery<PLClass>(strSale).ToList();
+
+           var RevenueAccounts = db.Database.SqlQuery<PLClassFinancialTransection>(strSale).ToList();
+
+
+            string strExp = @"select vartitle,varaccountno,isoperative,varOldAccount,sum(bal) as bal ,max(AccId) as AccId from (
+                select varOldAccount,vartitle,varaccountno,isoperative , A.intseqid as AccId,
+                (isnull((select sum(C.flDebit)-sum(C.flCredit)
+                from 
+                tblVoucherMaster M
+                inner join tblVoucherDetail C  on C.intVoucherId=M.intSeqId 
+                and C.varRefType=M.varVoucherType and C.intCompanyId=M.intCompanyId and C.intFranchiseId=M.intFranchId
+                and M.intClientId=C.intClientId 
+                inner join  
+                tblChartOfAccount B 
+                on B.intSeqId=C.intAccountId and C.intCompanyId=B.intCompanyId and C.intFranchiseId=B.intCountryId 
+                and M.intClientId=B.intClientId
+                where B.varAccountNo like A.varAccountNo + '%' 
+                and isnull(isposted,1)=case isnull(isposted,1) when -1 then isnull(isposted,1) else 1 end 
+                and dtVoucherDate > '" + parmsFdate + @"' and dtVoucherDate < '" + parmsTdate + @"'
+                and M.intClientId=" + sql.getClientId() + @"
+                ),0) )
+                 as bal
+                from tblChartOfAccount A
+                Where A.intClientId=" + sql.getClientId() + @" 
+                ) as tb
+                where varAccountNo like '06%'
+                group by varOldAccount,vartitle,varaccountno,isoperative
+                Having  (sum(bal)>0 or sum(bal)<0)
+                order by varaccountno";
+
+            ProfitClass.ExpenseAccounts = db.Database.SqlQuery<PLClass>(strExp).ToList();
+
+            var expAccount=db.Database.SqlQuery<PLClassFinancialTransection>(strExp).ToList();
+
+          
+
+            var client = new WebClient();
+            //getting opening from weaving
+            string url = System.Configuration.ConfigurationManager.AppSettings["Weaving"] + "/ApiApp/API/FabricClosingAmount/" + sql.getClientId() + "/" + apiparmsFDate + "/" + apiparmsTDate + "/Opening";  ///System.Configuration.ConfigurationManager.AppSettings["Weaving"] + "/ApiApp/API/FabricClosingAmount/" + sql.getClientId() + "/" + "2001-01-01"+"/"+ fdate;
+            var OP = client.DownloadString(url);
+            PLClass opcl = new PLClass();
+            opcl.bal = Convert.ToDecimal(OP);
+            opcl.vartitle = "Opening";
+            opcl.varaccountno = "0";
+            opcl.varOldAccount = "0";
+            ProfitClass.OpeningClosing = new List<PLClass>();
+            ProfitClass.OpeningClosing.Add(opcl);
+            //getting closing from weaving
+            PLClass opclosing = new PLClass();
+            string urlcl = System.Configuration.ConfigurationManager.AppSettings["Weaving"] + "/ApiApp/API/FabricClosingAmount/" + sql.getClientId() + "/" + apiparmsFDate + "/" + apiparmsTDate;
+            var CL = client.DownloadString(urlcl);
+            opclosing.bal = Convert.ToDecimal(CL);
+            opclosing.vartitle = "Closing";
+            opclosing.varaccountno = "0";
+            opclosing.varOldAccount = "0";
+            ProfitClass.OpeningClosing.Add(opclosing);
+
+
+            PLClass Adjustment = new PLClass();
+            ProfitClass.Adjustments = new List<PLClass>();
+            string urlAdj = System.Configuration.ConfigurationManager.AppSettings["Weaving"] + "/ApiApp/API/FabricAdjustmentAmount/" + sql.getClientId() + "/" + apiparmsFDate + "/" + apiparmsTDate;
+            var CLAdj = client.DownloadString(urlAdj);
+            Adjustment.bal = Convert.ToDecimal(CLAdj);
+            Adjustment.vartitle = "AdjPL";
+            Adjustment.varaccountno = "0";
+            Adjustment.varOldAccount = "0";
+
+            ProfitClass.Adjustments.Add(Adjustment);
+
+
+
+            PLClass Totals = new PLClass();
+            //Adding CGS
+
+            decimal CGS = Convert.ToDecimal((ProfitClass.OpeningClosing[0].bal + ProfitClass.PurchaseAccounts[0].bal + ProfitClass.Adjustments[0].bal - (ProfitClass.PurchaseAccounts[1].bal + ProfitClass.OpeningClosing[1].bal)));
+
+            //if (sql.getClientId() == 7)
+            //{
+            //    CGS = Convert.ToDecimal((ProfitClass.OpeningClosing[0].bal + ProfitClass.PurchaseAccounts[0].bal + ProfitClass.PurchaseAccounts[2].bal + ProfitClass.Adjustments[0].bal - (ProfitClass.PurchaseAccounts[1].bal + ProfitClass.OpeningClosing[1].bal)));
+            //}
+
+            decimal totalSale =  (RevenueAccounts[0].bal - RevenueAccounts[1].bal);
+            var acId = RevenueAccounts[0].AccId;
+
+            Totals.bal = CGS;
+            Totals.vartitle = "CGS";
+            Totals.varaccountno = "0";
+            Totals.varOldAccount = "0";
+            ProfitClass.Totals = new List<PLClass>();
+            ProfitClass.Totals.Add(Totals);
+            //adding Gross Profit
+            PLClass TotalGross = new PLClass();
+            decimal Gross = (ProfitClass.RevenueAccounts[0].bal - ProfitClass.RevenueAccounts[1].bal) - CGS;
+
+            TotalGross.bal = Gross;
+            TotalGross.vartitle = "Gross";
+            TotalGross.varaccountno = "0";
+            TotalGross.varOldAccount = "0";
+            ProfitClass.Totals.Add(TotalGross);
+
+           // add Net Expense
+
+            PLClass TotalExpcl = new PLClass();
+            decimal TotalExp = Convert.ToDecimal(ProfitClass.ExpenseAccounts.Where(x => x.isoperative == true).Sum(x => x.bal).ToString());
+            //TotalExpcl.bal = TotalExp;
+            //TotalExpcl.vartitle = "Expense";
+            //TotalExpcl.varaccountno = "0";
+            //TotalExpcl.varOldAccount = "0";
+            //ProfitClass.Totals.Add(TotalExpcl);
+
+            //add Net Total
+
+            PLClass TotalNetProfit = new PLClass();
+            decimal NetTotal = Gross - TotalExp;
+            //TotalNetProfit.bal = NetTotal;
+            //TotalNetProfit.vartitle = "Total";
+            //TotalNetProfit.varaccountno = "0";
+            //TotalNetProfit.varOldAccount = "0";
+            //ProfitClass.Totals.Add(TotalNetProfit);
+
+            string exceptionMessage = "";
+
+            try
+            {
+          
+
+            // start code of master records save 
+
+            using (AMS_SAASEntities dataContext = new AMS_SAASEntities())
+            {
+
+                bool flag = sql.GetClosingFlag(ParmDate);
+                //--END---//
+                tblVoucherMaster tblTemp = new tblVoucherMaster();
+                voucherMaxid = sql.getMaxIDVoucherWise("intSeqId", "tblVoucherMaster", "CL");
+                tblTemp.intSeqId = voucherMaxid;
+                tblTemp.intFpId = sql.getFinancialPeriodId();
+                tblTemp.varVoucherNo = (sql.getMaxIDVoucherWise("intSeqId", "tblVoucherMaster", "CL")).ToString();
+                tblTemp.dtVoucherDate = varOrderdate;
+                tblTemp.varVoucherType = "CL";
+                tblTemp.intRefId = -1;
+                tblTemp.varRefType = "A";
+                //tblTemp.varTextInPrint = Textprint;
+                tblTemp.isPosted = sql.getPostedId();
+                tblTemp.intPostedBy = "A";
+                tblTemp.dtModifiedDate = DateTime.Now;
+                tblTemp.intModifiedBy = getCreatedby();
+                tblTemp.dtCreationDate = DateTime.Now;
+                tblTemp.intCreatedBy = getCreatedby().ToString();
+                tblTemp.intCompanyId = sql.getCompanyId();
+                tblTemp.intFranchId = sql.getBranchId();
+                tblTemp.intClientId = sql.getClientId();
+                dataContext.tblVoucherMasters.Add(tblTemp);
+                dataContext.SaveChanges();
+            }
+                // end code of master records save 
+
+
+                //starting Financial records saving 
+
+                using (AMS_SAASEntities dataContext = new AMS_SAASEntities())
+                {
+                    //--END---//
+                    tblFinancialClosing tblTemp = new tblFinancialClosing();
+                    int Maxid = sql.getMaxIDCompanyWise("tblFinancialClosing", "intSeqId");
+                    tblTemp.intSeqID = Maxid;
+
+                    tblTemp.intVoucherId = voucherMaxid;
+
+                    tblTemp.varDesc = txtDesc;
+                    tblTemp.dtFromDate = frdate;
+                    tblTemp.varRefType = "CL";
+                    tblTemp.dtToDate = varOrderdate;
+                    tblTemp.dtCreationDate = DateTime.Now;
+                    tblTemp.intUpdatedBy = getCreatedby();
+                    tblTemp.intCompanyId = sql.getCompanyId();
+                    tblTemp.intCompanyId = sql.getClientId();
+                    dataContext.tblFinancialClosings.Add(tblTemp);
+                    dataContext.SaveChanges();
+                }
+
+                //ending financial record saving
+
+
+
+                //start tblVoucherdetail expense 06 account adding 
+
+                foreach (var Acc in expAccount)
+            {
+
+
+                using (AMS_SAASEntities dataContext = new AMS_SAASEntities())
+                {
+                    var MaxDetailId = dataContext.tblVoucherDetails.OrderByDescending(x => x.intSeqId).Where(x => x.varRefType == "CL" && x.intClientId == clientid).Select(x => x.intSeqId).FirstOrDefault() + 1;
+                    int maxid2 = Convert.ToInt32(MaxDetailId);
+                    tblVoucherDetail tblDetaildr = new tblVoucherDetail();
+                    tblDetaildr.intSeqId = maxid2;
+                    tblDetaildr.intVoucherId = voucherMaxid;
+                    tblDetaildr.intAccountId = Acc.AccId;
+                    //Convert.ToInt32(dtOrderDetail.Rows[i]["intAccountId"]);
+                    tblDetaildr.intRefId = -1;
+                    tblDetaildr.varRefType = "CL";
+                    tblDetaildr.varDescription = Acc.vartitle+ " As on " + varOrderdate;
+                    tblDetaildr.varSpecialNotes = " ";
+                   // tblDetaildr.intAccountId = Acc.
+                    double res = Convert.ToDouble(Acc.bal);
+
+                    if(res > 0)
+                    {
+                        tblDetaildr.flDebit = 0;
+                        tblDetaildr.flCredit = Convert.ToDecimal(res);
+
+                    }
+                    else if(res < 0)
+                    {
+                        tblDetaildr.flDebit = Convert.ToDecimal(res);
+                        tblDetaildr.flCredit = 0;
+                    }
+                     
+                    tblDetaildr.varFValue = "";
+                    tblDetaildr.varVType = "";
+                    tblDetaildr.dtCreationDate = DateTime.Now;
+                    tblDetaildr.intFranchiseId = sql.getBranchId();
+                    tblDetaildr.intCompanyId = sql.getCompanyId();
+                    tblDetaildr.intClientId = sql.getClientId();
+                    dataContext.tblVoucherDetails.Add(tblDetaildr);
+                    dataContext.SaveChanges();
+                }
+
+
+
+            }
+
+
+
+            //end tblVoucherdetail expense 06 account adding 
+
+            //tblVoucherdetail sale account adding 
+            using (AMS_SAASEntities dataContext = new AMS_SAASEntities())
+            {
+                var MaxDetailId = dataContext.tblVoucherDetails.OrderByDescending(x => x.intSeqId).Where(x => x.varRefType == "CL" && x.intClientId == clientid).Select(x => x.intSeqId).FirstOrDefault() + 1;
+                int maxid2 = Convert.ToInt32(MaxDetailId);
+                tblVoucherDetail tblDetaildr = new tblVoucherDetail();
+                tblDetaildr.intSeqId = maxid2;
+                tblDetaildr.intVoucherId = voucherMaxid;
+                tblDetaildr.intAccountId = acId;
+                //Convert.ToInt32(dtOrderDetail.Rows[i]["intAccountId"]);
+                tblDetaildr.intRefId = -1;
+                tblDetaildr.varRefType = "CL";
+                tblDetaildr.varDescription = "Sale As on " + varOrderdate;
+                tblDetaildr.varSpecialNotes = " ";
+                tblDetaildr.flDebit = totalSale;
+                tblDetaildr.flCredit = 0;
+                tblDetaildr.varFValue = "";
+                tblDetaildr.varVType = "";
+                tblDetaildr.dtCreationDate = DateTime.Now;
+                tblDetaildr.intFranchiseId = sql.getBranchId();
+                tblDetaildr.intCompanyId = sql.getCompanyId();
+                tblDetaildr.intClientId = sql.getClientId();
+                dataContext.tblVoucherDetails.Add(tblDetaildr);
+                dataContext.SaveChanges();
+            }
+            //ending tblVoucherdetail sale account adding 
+
+
+
+
+            //tblVoucherdetail Opening account adding 
+            using (AMS_SAASEntities dataContext = new AMS_SAASEntities())
+            {
+                var MaxDetailId = dataContext.tblVoucherDetails.OrderByDescending(x => x.intSeqId).Where(x => x.varRefType == "CL" && x.intClientId == clientid).Select(x => x.intSeqId).FirstOrDefault() + 1;
+                int maxid2 = Convert.ToInt32(MaxDetailId);
+                tblVoucherDetail tblDetaildr = new tblVoucherDetail();
+                tblDetaildr.intSeqId = maxid2;
+                tblDetaildr.intVoucherId = voucherMaxid;
+                tblDetaildr.intAccountId = stockId;
+                //Convert.ToInt32(dtOrderDetail.Rows[i]["intAccountId"]);
+                tblDetaildr.intRefId = -1;
+                tblDetaildr.varRefType = "CL";
+                tblDetaildr.varDescription = "Stock Opening As on " + varOrderdate;
+                tblDetaildr.varSpecialNotes = " ";
+
+                tblDetaildr.flDebit = 0;
+                tblDetaildr.flCredit = Convert.ToDecimal(OP);
+                tblDetaildr.varFValue = "";
+                tblDetaildr.varVType = "";
+                tblDetaildr.dtCreationDate = DateTime.Now;
+                tblDetaildr.intFranchiseId = sql.getBranchId();
+                tblDetaildr.intCompanyId = sql.getCompanyId();
+                tblDetaildr.intClientId = sql.getClientId();
+                dataContext.tblVoucherDetails.Add(tblDetaildr);
+                dataContext.SaveChanges();
+            }
+            //ending tblVoucherdetail Opening account adding 
+
+            //tblVoucherdetail netProfit account as credit and debit starting 
+
+            using (AMS_SAASEntities dataContext = new AMS_SAASEntities())
+            {
+                var MaxDetailId = dataContext.tblVoucherDetails.OrderByDescending(x => x.intSeqId).Where(x => x.varRefType == "CL" && x.intClientId == clientid).Select(x => x.intSeqId).FirstOrDefault() + 1;
+                int maxid2 = Convert.ToInt32(MaxDetailId);
+                tblVoucherDetail tblDetaildr = new tblVoucherDetail();
+                tblDetaildr.intSeqId = maxid2;
+                tblDetaildr.intVoucherId = voucherMaxid;
+
+                tblDetaildr.intRefId = -1;
+                tblDetaildr.varRefType = "CL";
+                tblDetaildr.varDescription = "NetProfit As on " + varOrderdate;
+                tblDetaildr.varSpecialNotes = " ";
+                tblDetaildr.intAccountId = profitAccId;
+
+                if(NetTotal>0 || NetTotal == 0)
+                {
+                    tblDetaildr.flDebit = 0;
+                    tblDetaildr.flCredit = NetTotal;
+                }
+                else
+                {
+                    tblDetaildr.flDebit = NetTotal;
+                    tblDetaildr.flCredit = 0;
+                }
+                
+                tblDetaildr.varFValue = "";
+                tblDetaildr.varVType = "";
+                tblDetaildr.dtCreationDate = DateTime.Now;
+                tblDetaildr.intFranchiseId = sql.getBranchId();
+                tblDetaildr.intCompanyId = sql.getCompanyId();
+                tblDetaildr.intClientId = sql.getClientId();
+                dataContext.tblVoucherDetails.Add(tblDetaildr);
+                dataContext.SaveChanges();
+            }
+
+                using (AMS_SAASEntities dataContext = new AMS_SAASEntities())
+                {
+                    var MaxDetailId = dataContext.tblVoucherDetails.OrderByDescending(x => x.intSeqId).Where(x => x.varRefType == "CL" && x.intClientId == clientid).Select(x => x.intSeqId).FirstOrDefault() + 1;
+                    int maxid2 = Convert.ToInt32(MaxDetailId);
+                    tblVoucherDetail tblDetaildr = new tblVoucherDetail();
+                    tblDetaildr.intSeqId = maxid2;
+                    tblDetaildr.intVoucherId = voucherMaxid;
+
+                    tblDetaildr.intRefId = -1;
+                    tblDetaildr.varRefType = "CL";
+                    tblDetaildr.varDescription = "NetProfit As on " + varOrderdate;
+                    tblDetaildr.varSpecialNotes = " ";
+                    tblDetaildr.intAccountId = profitAccId;
+                    if (NetTotal > 0 || NetTotal == 0)
+                    {
+                        tblDetaildr.flDebit = NetTotal;
+                        tblDetaildr.flCredit = 0;
+                    }
+                    else
+                    {
+                        tblDetaildr.flDebit = 0;
+                        tblDetaildr.flCredit = NetTotal;
+                    }
+                    tblDetaildr.varFValue = "";
+                    tblDetaildr.varVType = "";
+                    tblDetaildr.dtCreationDate = DateTime.Now;
+                    tblDetaildr.intFranchiseId = sql.getBranchId();
+                    tblDetaildr.intCompanyId = sql.getCompanyId();
+                    tblDetaildr.intClientId = sql.getClientId();
+                    dataContext.tblVoucherDetails.Add(tblDetaildr);
+                    dataContext.SaveChanges();
+                }
+
+                //ending tblVoucherdetail netProfit account ending 
+
+
+                // starting detail part of tblPartnersDetail
+
+
+                string query = "";
+            query += "  select * from  MCI.dbo.tblPartnersDetail where intcompanyid=" + sql.getClientId() + " ";// drpYarn
+            DataTable dtLoad = sql.LoadData(query, "tblMaster");
+            for(int i=0;i<dtLoad.Rows.Count;i++)
+            {
+
+                decimal flAccPercentage = Convert.ToDecimal(dtLoad.Rows[i]["flPercentage"]);
+                int accId =   Convert.ToInt32(dtLoad.Rows[i]["intAccountId"]);
+                using (AMS_SAASEntities dataContext = new AMS_SAASEntities())
+                {
+                    var MaxDetailId = dataContext.tblVoucherDetails.OrderByDescending(x => x.intSeqId).Where(x => x.varRefType == "CL" && x.intClientId == clientid).Select(x => x.intSeqId).FirstOrDefault() + 1;
+                    int maxid2 = Convert.ToInt32(MaxDetailId);
+                    tblVoucherDetail tblDetaildr = new tblVoucherDetail();
+                    tblDetaildr.intSeqId = maxid2;
+                    tblDetaildr.intVoucherId = voucherMaxid;
+
+                    tblDetaildr.intRefId = -1;
+                    tblDetaildr.varRefType = "CL";
+                    tblDetaildr.varDescription = "Partner As on " + varOrderdate;
+                    tblDetaildr.varSpecialNotes = " ";
+                    tblDetaildr.intAccountId = accId;
+
+                        if (NetTotal > 0)
+                        {
+                            tblDetaildr.flDebit = 0;
+                            tblDetaildr.flCredit = (flAccPercentage * NetTotal) / 100;
+                        }
+                        else
+                        {
+                            tblDetaildr.flCredit = 0;
+                            tblDetaildr.flDebit = (flAccPercentage * NetTotal) / 100;
+                        }
+
+                    tblDetaildr.varFValue = "";
+                    tblDetaildr.varVType = "";
+                    tblDetaildr.dtCreationDate = DateTime.Now;
+                    tblDetaildr.intFranchiseId = sql.getBranchId();
+                    tblDetaildr.intCompanyId = sql.getCompanyId();
+                    tblDetaildr.intClientId = sql.getClientId();
+                    dataContext.tblVoucherDetails.Add(tblDetaildr);
+                    dataContext.SaveChanges();
+                }
+            }
+
+
+
+            // ending detail part of tblPartnersDetail
+
+            //tblVoucherdetail  closing adding 
+            using (AMS_SAASEntities dataContext = new AMS_SAASEntities())
+            {
+                var MaxDetailId = dataContext.tblVoucherDetails.OrderByDescending(x => x.intSeqId).Where(x => x.varRefType == "CL" && x.intClientId == clientid).Select(x => x.intSeqId).FirstOrDefault() + 1;
+                int maxid2 = Convert.ToInt32(MaxDetailId);
+                tblVoucherDetail tblDetaildr = new tblVoucherDetail();
+                tblDetaildr.intSeqId = maxid2;
+                tblDetaildr.intVoucherId = voucherMaxid;
+              
+                tblDetaildr.intRefId = -1;
+                tblDetaildr.varRefType = "CL";
+                tblDetaildr.varDescription = "Stock Closing As on " + varOrderdate;
+                tblDetaildr.varSpecialNotes = " ";
+                tblDetaildr.intAccountId = stockId;
+                tblDetaildr.flDebit = Convert.ToDecimal(CL);
+                tblDetaildr.flCredit = 0;
+                tblDetaildr.varFValue = "";
+                tblDetaildr.varVType = "";
+                tblDetaildr.dtCreationDate = DateTime.Now;
+                tblDetaildr.intFranchiseId = sql.getBranchId();
+                tblDetaildr.intCompanyId = sql.getCompanyId();
+                tblDetaildr.intClientId = sql.getClientId();
+                dataContext.tblVoucherDetails.Add(tblDetaildr);
+                dataContext.SaveChanges();
+            }
+                //ending tblVoucherdetail closing adding 
+            }
+            catch (Exception e)
+            {
+                exceptionMessage = e.Message + e.StackTrace;
+            }
+
+
+
+            return exceptionMessage;
+        }
+        public JsonResult ProfitLossDetail(string dtFromDate, string dtToDate)
+        {
+            //string dtFromDate = "01/01/2018";
+            //    string dtToDate="01/01/2019";
+            //string dtFromDate="01/01/2018", dtToDate="01/01/2019";
+
+
+            System.IO.File.WriteAllText(Server.MapPath("~/abc44.txt"), "Call");
+
+
+            Balances Bal = new Balances();
+            AMS_SAASEntities db = new AMS_SAASEntities();
+           
+            var dtfdate = dtFromDate.Split('/');
+            var dttdate = dtToDate.Split('/');
+            int cid = sql.getClientId();
+            int ParentId = -1;
+
+            string parmsFdate = dtfdate[2] + "-" + dtfdate[1] + "-" + dtfdate[0];
+            string parmsTdate = dttdate[2] + "-" + dttdate[1] + "-" + dttdate[0];
+            string apiparmsFDate = parmsFdate;
+            string apiparmsTDate = parmsTdate;
+
+            string fdate = apiparmsFDate; //Convert.ToDateTime(apiparmsFDate).AddDays(-1).ToString("yyyy-MM-dd");
+            //var abc = fdate.Split('/');
+            //string parmsFdate2 = abc[2] + "-" + abc[1] + "-" + abc[0];
+            parmsFdate += " 00:00:00";
+            parmsTdate += " 23:59:59";
+            //sql = new SqlClass();
+            //  string varOldAccount = db.tblChartOfAccounts.FirstOrDefault(x => x.intSeqId == ParentId).varOldAccount.ToString();
+            PLAllClasses ProfitClass = new PLAllClasses();
+            int clientid = sql.getClientId();
+            int PurchaseAcc =Convert.ToInt32( db.tblPreferences.Where(x => x.intClientId == clientid).Select(x => x.intPurchaseAccId).FirstOrDefault().ToString());
+           // decimal purParent=Convert.ToInt32(db.tblChartOfAccounts.Where(x=>x.intClientId==clientid && x.intSeqId==PurchaseAcc).Select(x=>x.intParentAccountId).FirstOrDefault().ToString());
+            string purParentAccNo = db.tblChartOfAccounts.Where(x => x.intSeqId == PurchaseAcc && x.intClientId == clientid).Select(x => x.varAccountNo).FirstOrDefault().ToString();
+            purParentAccNo = purParentAccNo + "-";
+
+            string strPurchase = @"select vartitle,varaccountno,isoperative,varOldAccount,sum(bal) as bal from (
+            select A.intSeqId,varOldAccount,vartitle,varaccountno,isoperative,
+            (isnull((select sum(C.flDebit) - sum(C.flCredit)
+            from tblVoucherMaster M inner
+            join tblVoucherDetail C  on C.intVoucherId = M.intSeqId
+            and C.varRefType = M.varVoucherType and C.intCompanyId = M.intCompanyId and C.intFranchiseId = M.intFranchId
+            and M.intClientId = C.intClientId
+            inner join tblChartOfAccount B
+            on B.intSeqId = C.intAccountId and C.intCompanyId = B.intCompanyId and C.intFranchiseId = B.intCountryId
+            and M.intClientId = B.intClientId
+            where B.varAccountNo like A.varAccountNo + '%'
+            and isnull(isposted, 1) =case isnull(isposted, 1) when - 1 then isnull(isposted, 1) else 1 end
+            and dtVoucherDate >= '"+parmsFdate+ @"' and dtVoucherDate < '" + parmsTdate + @"'
+            and M.intClientId = " + sql.getClientId()+@"
+            ),0) )
+             as bal
+            from tblChartOfAccount A
+            Where A.intClientId = "+sql.getClientId()+ @"
+            ) as tb
+            where varAccountNo like '"+ purParentAccNo + "%'  ";
+
+            //if(sql.getClientId()==7)
+            //{
+            //    strPurchase += " or varAccountNo like '02-01-04-%' ";
+            //}
+            strPurchase += " and isoperative=1 group by varOldAccount,vartitle,varaccountno,isoperative";
+
+
+            ProfitClass.PurchaseAccounts = db.Database.SqlQuery<PLClass>(strPurchase).ToList();
+
+            string strSale = @"select vartitle,varaccountno,isoperative,varOldAccount,sum(bal) as bal from (
+            select A.intSeqId,varOldAccount,vartitle,varaccountno,isoperative,
+            (isnull((select  sum(C.flCredit) - sum(C.flDebit) 
+            from tblVoucherMaster M inner
+            join tblVoucherDetail C  on C.intVoucherId = M.intSeqId
+            and C.varRefType = M.varVoucherType and C.intCompanyId = M.intCompanyId and C.intFranchiseId = M.intFranchId
+            and M.intClientId = C.intClientId
+            inner join tblChartOfAccount B
+            on B.intSeqId = C.intAccountId and C.intCompanyId = B.intCompanyId and C.intFranchiseId = B.intCountryId
+            and M.intClientId = B.intClientId
+            where B.varAccountNo like A.varAccountNo + '%'
+            and isnull(isposted, 1) =case isnull(isposted, 1) when - 1 then isnull(isposted, 1) else 1 end
+            and dtVoucherDate >= '" + parmsFdate + @"' and dtVoucherDate < '" + parmsTdate + @"'
+            and M.intClientId = " + sql.getClientId() + @"
+            ),0) )
+             as bal
+            from tblChartOfAccount A
+            Where A.intClientId = " + sql.getClientId() + @"
+            ) as tb
+            where varaccountno like '%05-01-%' and isoperative=1
+            group by varOldAccount,vartitle,varaccountno,isoperative";
+
+            ProfitClass.RevenueAccounts = db.Database.SqlQuery<PLClass>(strSale).ToList();
+
+            string strExp = @"select vartitle,varaccountno,isoperative,varOldAccount,sum(bal) as bal from (
+                select varOldAccount,vartitle,varaccountno,isoperative,
+                (isnull((select sum(C.flDebit)-sum(C.flCredit)
+                from 
+                tblVoucherMaster M
+                inner join tblVoucherDetail C  on C.intVoucherId=M.intSeqId 
+                and C.varRefType=M.varVoucherType and C.intCompanyId=M.intCompanyId and C.intFranchiseId=M.intFranchId
+                and M.intClientId=C.intClientId 
+                inner join  
+                tblChartOfAccount B 
+                on B.intSeqId=C.intAccountId and C.intCompanyId=B.intCompanyId and C.intFranchiseId=B.intCountryId 
+                and M.intClientId=B.intClientId
+                where B.varAccountNo like A.varAccountNo + '%' 
+                and isnull(isposted,1)=case isnull(isposted,1) when -1 then isnull(isposted,1) else 1 end 
+                and dtVoucherDate > '" + parmsFdate + @"' and dtVoucherDate < '" + parmsTdate + @"'
+                and M.intClientId=" + sql.getClientId() + @"
+                ),0) )
+                 as bal
+                from tblChartOfAccount A
+                Where A.intClientId=" + sql.getClientId() + @" 
+                ) as tb
+                where varAccountNo like '06-%' and varAccountNo not like '06-01%'
+                group by varOldAccount,vartitle,varaccountno,isoperative
+                Having sum(bal)>0
+                order by varaccountno";
+            ProfitClass.ExpenseAccounts = db.Database.SqlQuery<PLClass>(strExp).ToList();
+
+            var client = new WebClient();
+            //getting opening from weaving
+            string url = System.Configuration.ConfigurationManager.AppSettings["Weaving"] + "/ApiApp/API/FabricClosingAmount/" + sql.getClientId() + "/" + apiparmsFDate + "/" + apiparmsTDate +"/Opening";  ///System.Configuration.ConfigurationManager.AppSettings["Weaving"] + "/ApiApp/API/FabricClosingAmount/" + sql.getClientId() + "/" + "2001-01-01"+"/"+ fdate;
+            var OP = client.DownloadString(url);
+            PLClass opcl = new PLClass();
+            opcl.bal = Convert.ToDecimal(OP);
+            opcl.vartitle = "Opening";
+            opcl.varaccountno = "0";
+            opcl.varOldAccount = "0";
+            ProfitClass.OpeningClosing = new List<PLClass>();
+            ProfitClass.OpeningClosing.Add(opcl);
+            //getting closing from weaving
+            PLClass opclosing = new PLClass();
+            string urlcl = System.Configuration.ConfigurationManager.AppSettings["Weaving"] + "/ApiApp/API/FabricClosingAmount/" + sql.getClientId() + "/" + apiparmsFDate + "/" + apiparmsTDate;
+            var CL = client.DownloadString(urlcl);
+            opclosing.bal = Convert.ToDecimal(CL);
+            opclosing.vartitle = "Closing";
+            opclosing.varaccountno = "0";
+            opclosing.varOldAccount = "0";
+            ProfitClass.OpeningClosing.Add(opclosing);
+            //Getting Adjustments From Weaving
+            //getting closing from weaving
+            PLClass Adjustment = new PLClass();
+            ProfitClass.Adjustments = new List<PLClass>();
+            string urlAdj = System.Configuration.ConfigurationManager.AppSettings["Weaving"] + "/ApiApp/API/FabricAdjustmentAmount/" + sql.getClientId() + "/" + apiparmsFDate + "/" + apiparmsTDate;
+            var CLAdj = client.DownloadString(urlAdj);
+            Adjustment.bal = Convert.ToDecimal(CLAdj);
+            Adjustment.vartitle = "AdjPL";
+            Adjustment.varaccountno = "0";
+            Adjustment.varOldAccount = "0";
+            
+            ProfitClass.Adjustments.Add(Adjustment);
+
+
+
+            PLClass Totals = new PLClass();
+            //Adding CGS
+
+            decimal CGS = Convert.ToDecimal((ProfitClass.OpeningClosing[0].bal + ProfitClass.PurchaseAccounts[0].bal+ ProfitClass.Adjustments[0].bal - (ProfitClass.PurchaseAccounts[1].bal + ProfitClass.OpeningClosing[1].bal)));
+
+            //if (sql.getClientId() == 7)
+            //{
+            //    CGS = Convert.ToDecimal((ProfitClass.OpeningClosing[0].bal + ProfitClass.PurchaseAccounts[0].bal + ProfitClass.PurchaseAccounts[2].bal + ProfitClass.Adjustments[0].bal - (ProfitClass.PurchaseAccounts[1].bal + ProfitClass.OpeningClosing[1].bal)));
+            //}
+
+
+            Totals.bal = CGS;
+            Totals.vartitle = "CGS";
+            Totals.varaccountno = "0";
+            Totals.varOldAccount = "0";
+            ProfitClass.Totals = new List<PLClass>();
+            ProfitClass.Totals.Add(Totals);
+            //adding Gross Profit
+            PLClass TotalGross = new PLClass();
+            decimal Gross = (ProfitClass.RevenueAccounts[0].bal - ProfitClass.RevenueAccounts[1].bal) - CGS;
+            TotalGross.bal = Gross;
+            TotalGross.vartitle = "Gross";
+            TotalGross.varaccountno = "0";
+            TotalGross.varOldAccount = "0";
+            ProfitClass.Totals.Add(TotalGross);
+            //add Net Expense
+            PLClass TotalExpcl = new PLClass();
+            decimal TotalExp =Convert.ToDecimal(ProfitClass.ExpenseAccounts.Where(x => x.isoperative == true).Sum(x=>x.bal).ToString());
+            TotalExpcl.bal = TotalExp;
+            TotalExpcl.vartitle = "Expense";
+            TotalExpcl.varaccountno = "0";
+            TotalExpcl.varOldAccount = "0";
+            ProfitClass.Totals.Add(TotalExpcl);
+            //add Net Total
+            PLClass TotalNetProfit = new PLClass();
+            decimal NetTotal = Gross - TotalExp;
+            TotalNetProfit.bal = NetTotal;
+            TotalNetProfit.vartitle = "Total";
+            TotalNetProfit.varaccountno = "0";
+            TotalNetProfit.varOldAccount = "0";
+            ProfitClass.Totals.Add(TotalNetProfit);
+
+
+            return Json(ProfitClass, JsonRequestBehavior.AllowGet);
+        }
+
+        // starting PDF converter
+
+       
+        // ending PDF converter
+
+        [HttpPost]
+        public string ProfitLossDetailPrint(string dtFromDate, string dtToDate)
+        {
+            Balances Bal = new Balances();
+            AMS_SAASEntities db = new AMS_SAASEntities();
+
+            var dtfdate = dtFromDate.Split('/');
+            var dttdate = dtToDate.Split('/');
+            int cid = sql.getClientId();
+            int ParentId = -1;
+
+            string parmsFdate = dtfdate[2] + "-" + dtfdate[1] + "-" + dtfdate[0];
+            string parmsTdate = dttdate[2] + "-" + dttdate[1] + "-" + dttdate[0];
+            string apiparmsFDate = parmsFdate;
+            string apiparmsTDate = parmsTdate;
+
+            string fdate = apiparmsFDate; //Convert.ToDateTime(apiparmsFDate).AddDays(-1).ToString("yyyy-MM-dd");
+            //var abc = fdate.Split('/');
+            //string parmsFdate2 = abc[2] + "-" + abc[1] + "-" + abc[0];
+            parmsFdate += " 00:00:00";
+            parmsTdate += " 23:59:59";
+            //sql = new SqlClass();
+            //  string varOldAccount = db.tblChartOfAccounts.FirstOrDefault(x => x.intSeqId == ParentId).varOldAccount.ToString();
+            PLAllClasses ProfitClass = new PLAllClasses();
+            int clientid = sql.getClientId();
+            int PurchaseAcc = Convert.ToInt32(db.tblPreferences.Where(x => x.intClientId == clientid).Select(x => x.intPurchaseAccId).FirstOrDefault().ToString());
+            // decimal purParent=Convert.ToInt32(db.tblChartOfAccounts.Where(x=>x.intClientId==clientid && x.intSeqId==PurchaseAcc).Select(x=>x.intParentAccountId).FirstOrDefault().ToString());
+            string purParentAccNo = db.tblChartOfAccounts.Where(x => x.intSeqId == PurchaseAcc && x.intClientId == clientid).Select(x => x.varAccountNo).FirstOrDefault().ToString();
+            purParentAccNo = purParentAccNo + "-";
+
+            string strPurchase = @"select vartitle,varaccountno,isoperative,varOldAccount,sum(bal) as bal from (
+            select A.intSeqId,varOldAccount,vartitle,varaccountno,isoperative,
+            (isnull((select sum(C.flDebit) - sum(C.flCredit)
+            from tblVoucherMaster M inner
+            join tblVoucherDetail C  on C.intVoucherId = M.intSeqId
+            and C.varRefType = M.varVoucherType and C.intCompanyId = M.intCompanyId and C.intFranchiseId = M.intFranchId
+            and M.intClientId = C.intClientId
+            inner join tblChartOfAccount B
+            on B.intSeqId = C.intAccountId and C.intCompanyId = B.intCompanyId and C.intFranchiseId = B.intCountryId
+            and M.intClientId = B.intClientId
+            where B.varAccountNo like A.varAccountNo + '%'
+            and isnull(isposted, 1) =case isnull(isposted, 1) when - 1 then isnull(isposted, 1) else 1 end
+            and dtVoucherDate >= '" + parmsFdate + @"' and dtVoucherDate < '" + parmsTdate + @"'
+            and M.intClientId = " + sql.getClientId() + @"
+            ),0) )
+             as bal
+            from tblChartOfAccount A
+            Where A.intClientId = " + sql.getClientId() + @"
+            ) as tb
+            where varAccountNo like '" + purParentAccNo + "%'  ";
+
+       
+            strPurchase += " and isoperative=1 group by varOldAccount,vartitle,varaccountno,isoperative";
+
+
+            ProfitClass.PurchaseAccounts = db.Database.SqlQuery<PLClass>(strPurchase).ToList();
+
+            string strSale = @"select vartitle,varaccountno,isoperative,varOldAccount,sum(bal) as bal from (
+            select A.intSeqId,varOldAccount,vartitle,varaccountno,isoperative,
+            (isnull((select  sum(C.flCredit) - sum(C.flDebit) 
+            from tblVoucherMaster M inner
+            join tblVoucherDetail C  on C.intVoucherId = M.intSeqId
+            and C.varRefType = M.varVoucherType and C.intCompanyId = M.intCompanyId and C.intFranchiseId = M.intFranchId
+            and M.intClientId = C.intClientId
+            inner join tblChartOfAccount B
+            on B.intSeqId = C.intAccountId and C.intCompanyId = B.intCompanyId and C.intFranchiseId = B.intCountryId
+            and M.intClientId = B.intClientId
+            where B.varAccountNo like A.varAccountNo + '%'
+            and isnull(isposted, 1) =case isnull(isposted, 1) when - 1 then isnull(isposted, 1) else 1 end
+            and dtVoucherDate >= '" + parmsFdate + @"' and dtVoucherDate < '" + parmsTdate + @"'
+            and M.intClientId = " + sql.getClientId() + @"
+            ),0) )
+             as bal
+            from tblChartOfAccount A
+            Where A.intClientId = " + sql.getClientId() + @"
+            ) as tb
+            where varaccountno like '%05-01-%' and isoperative=1
+            group by varOldAccount,vartitle,varaccountno,isoperative";
+
+            ProfitClass.RevenueAccounts = db.Database.SqlQuery<PLClass>(strSale).ToList();
+
+            string strExp = @"select vartitle,varaccountno,isoperative,varOldAccount,sum(bal) as bal from (
+                select varOldAccount,vartitle,varaccountno,isoperative,
+                (isnull((select sum(C.flDebit)-sum(C.flCredit)
+                from 
+                tblVoucherMaster M
+                inner join tblVoucherDetail C  on C.intVoucherId=M.intSeqId 
+                and C.varRefType=M.varVoucherType and C.intCompanyId=M.intCompanyId and C.intFranchiseId=M.intFranchId
+                and M.intClientId=C.intClientId 
+                inner join  
+                tblChartOfAccount B 
+                on B.intSeqId=C.intAccountId and C.intCompanyId=B.intCompanyId and C.intFranchiseId=B.intCountryId 
+                and M.intClientId=B.intClientId
+                where B.varAccountNo like A.varAccountNo + '%' 
+                and isnull(isposted,1)=case isnull(isposted,1) when -1 then isnull(isposted,1) else 1 end 
+                and dtVoucherDate > '" + parmsFdate + @"' and dtVoucherDate < '" + parmsTdate + @"'
+                and M.intClientId=" + sql.getClientId() + @"
+                ),0) )
+                 as bal
+                from tblChartOfAccount A
+                Where A.intClientId=" + sql.getClientId() + @" 
+                ) as tb
+                where varAccountNo like '06-%' and varAccountNo not like '06-01%'
+                group by varOldAccount,vartitle,varaccountno,isoperative
+                Having sum(bal)>0
+                order by varaccountno";
+            ProfitClass.ExpenseAccounts = db.Database.SqlQuery<PLClass>(strExp).ToList();
+            var expAcc = db.Database.SqlQuery<PLClass>(strExp).ToList();
+
+            var client = new WebClient();
+            //getting opening from weaving
+            string url = System.Configuration.ConfigurationManager.AppSettings["Weaving"] + "/ApiApp/API/FabricClosingAmount/" + sql.getClientId() + "/" + apiparmsFDate + "/" + apiparmsTDate + "/Opening";  ///System.Configuration.ConfigurationManager.AppSettings["Weaving"] + "/ApiApp/API/FabricClosingAmount/" + sql.getClientId() + "/" + "2001-01-01"+"/"+ fdate;
+            var OP = client.DownloadString(url);
+            PLClass opcl = new PLClass();
+            opcl.bal = Convert.ToDecimal(OP);
+            opcl.vartitle = "Opening";
+            opcl.varaccountno = "0";
+            opcl.varOldAccount = "0";
+            ProfitClass.OpeningClosing = new List<PLClass>();
+            ProfitClass.OpeningClosing.Add(opcl);
+            //getting closing from weaving
+            PLClass opclosing = new PLClass();
+            string urlcl = System.Configuration.ConfigurationManager.AppSettings["Weaving"] + "/ApiApp/API/FabricClosingAmount/" + sql.getClientId() + "/" + apiparmsFDate + "/" + apiparmsTDate;
+            var CL = client.DownloadString(urlcl);
+            opclosing.bal = Convert.ToDecimal(CL);
+            opclosing.vartitle = "Closing";
+            opclosing.varaccountno = "0";
+            opclosing.varOldAccount = "0";
+            ProfitClass.OpeningClosing.Add(opclosing);
+            //Getting Adjustments From Weaving
+            //getting closing from weaving
+            PLClass Adjustment = new PLClass();
+            ProfitClass.Adjustments = new List<PLClass>();
+            string urlAdj = System.Configuration.ConfigurationManager.AppSettings["Weaving"] + "/ApiApp/API/FabricAdjustmentAmount/" + sql.getClientId() + "/" + apiparmsFDate + "/" + apiparmsTDate;
+            var CLAdj = client.DownloadString(urlAdj);
+            Adjustment.bal = Convert.ToDecimal(CLAdj);
+            Adjustment.vartitle = "AdjPL";
+            Adjustment.varaccountno = "0";
+            Adjustment.varOldAccount = "0";
+
+            ProfitClass.Adjustments.Add(Adjustment);
+
+
+
+            PLClass Totals = new PLClass();
+            //Adding CGS
+
+            decimal CGS = Convert.ToDecimal((ProfitClass.OpeningClosing[0].bal + ProfitClass.PurchaseAccounts[0].bal + ProfitClass.Adjustments[0].bal - (ProfitClass.PurchaseAccounts[1].bal + ProfitClass.OpeningClosing[1].bal)));
+
+            //if (sql.getClientId() == 7)
+            //{
+            //    CGS = Convert.ToDecimal((ProfitClass.OpeningClosing[0].bal + ProfitClass.PurchaseAccounts[0].bal + ProfitClass.PurchaseAccounts[2].bal + ProfitClass.Adjustments[0].bal - (ProfitClass.PurchaseAccounts[1].bal + ProfitClass.OpeningClosing[1].bal)));
+            //}
+
+
+            Totals.bal = CGS;
+            Totals.vartitle = "CGS";
+            Totals.varaccountno = "0";
+            Totals.varOldAccount = "0";
+            ProfitClass.Totals = new List<PLClass>();
+            ProfitClass.Totals.Add(Totals);
+            //adding Gross Profit
+            PLClass TotalGross = new PLClass();
+            decimal Gross = (ProfitClass.RevenueAccounts[0].bal - ProfitClass.RevenueAccounts[1].bal) - CGS;
+            TotalGross.bal = Gross;
+            TotalGross.vartitle = "Gross";
+            TotalGross.varaccountno = "0";
+            TotalGross.varOldAccount = "0";
+            ProfitClass.Totals.Add(TotalGross);
+            //add Net Expense
+            PLClass TotalExpcl = new PLClass();
+            decimal TotalExp = Convert.ToDecimal(ProfitClass.ExpenseAccounts.Where(x => x.isoperative == true).Sum(x => x.bal).ToString());
+            TotalExpcl.bal = TotalExp;
+            TotalExpcl.vartitle = "Expense";
+            TotalExpcl.varaccountno = "0";
+            TotalExpcl.varOldAccount = "0";
+            ProfitClass.Totals.Add(TotalExpcl);
+            //add Net Total
+            PLClass TotalNetProfit = new PLClass();
+            decimal NetTotal = Gross - TotalExp;
+            TotalNetProfit.bal = NetTotal;
+            TotalNetProfit.vartitle = "Total";
+            TotalNetProfit.varaccountno = "0";
+            TotalNetProfit.varOldAccount = "0";
+            ProfitClass.Totals.Add(TotalNetProfit);
+
+
+            // starting of printing option 
+
+            string html = "";
+
+            //   html += "<head><style> .annotationLayer,.annotationLayer select,.annotationLayer select a  { display:none !important }  </style></head>";
+
+
+            //ICSSResolver cssResolver = XMLWorkerHelper.
+            //ICssFile cssFile = XMLWorkerHelper.GetCSS(new ByteArrayInputStream(CSS.getBytes()));
+            //cssResolver.addCss(cssFile);
+
+
+
+            html += "<table style='width:100%'><tr><td><span style='float:left;font-weight: bold;margin-left:10px'>Profit Loss</span></td><td>";
+
+            html += "<span style='float:right;font-weight: bold;;margin-left:40px'>" + dtFromDate + "    -    "+ dtToDate + "</span></td></tr></table></br>";
+            html += " <div class='menu4_grid' style=''> ";
+            html += "<div class='container' style='width:100%;padding: 0px;'>";
+            html += "<fieldset class='popUpProfitLoss_div' style=''>";
+            html += "<table class='popUpProfitLoss' style='width:100% !important' cellspacing='1'  cellpadding='0'>";
+            html += "<tbody style = 'overflow-y:auto' > ";
+
+            html += "<tr> ";
+            html += "<td colspan='4'>Sale</td>";
+            html += "<td style = 'text-align: left;' class='mobile_padding'>"+ ProfitClass.RevenueAccounts[0].bal.ToString("N0") + "";
+            html += "</td>";
+            html += "</tr>";
+
+            html += "<tr hidden>";
+            html += "<td colspan = '4' > Sale Return</td>";
+            html += "<td style = 'text-align: left;' >"+ ProfitClass.RevenueAccounts[1].bal.ToString("N0") + "</td>";
+            html += "</tr>";
+            html += "<tr>";
+            html += "<td class='margin_left_pl' colspan='4' style='background-color:#ccc'>Net Sale</td>";
+
+            decimal Net_Sale = ProfitClass.RevenueAccounts[0].bal - ProfitClass.RevenueAccounts[1].bal;
+            html += "<td style = 'text-align: right;background-color:#ccc' >" + Net_Sale.ToString("N0") + "</td>";
+            html += "</tr>";
+            html += "<tr>";
+            html += "<td colspan = '4' > Opening </td> ";
+            html += "<td style='text-align: left;'>";
+            html += " " + ProfitClass.OpeningClosing[0].bal.ToString("N0") + "";
+            html += "</td>";
+            html += "</tr>";
+            html += "<tr>";
+            html += "<td colspan = '4' > Purchase </td> ";
+
+            //if (ProfitClass.PurchaseAccounts[2].bal != null)
+            //{
+
+            //    html += "<td style='text-align: left;'>" + ProfitClass.PurchaseAccounts[0].bal + ProfitClass.PurchaseAccounts[2].bal + "</td>";
+
+            //} else
+            //{
+                html += "<td style='text-align: left;'>" + ProfitClass.PurchaseAccounts[0].bal.ToString("N0") + "</td>";
+            //}
+
+            html += "</tr>";
+           
+            html += "<tr hidden>";
+            html += "<td colspan = '4' > Purchase Return</td>";
+            html += " <td style = 'text-align: left;' >"+ ProfitClass.PurchaseAccounts[1].bal.ToString("N0") + "</td>";
+            html += "</tr>";
+            html += "<tr>";
+            html += "<td colspan = '4' > Adjustment </td> ";
+            html += "<td style='text-align: left;'>" + ProfitClass.Adjustments[0].bal.ToString("N0") + "</td>";
+            html += "</tr>";
+            html += "<tr>";
+            html += "<td colspan = '4' > Closing </td> ";
+            html += " <td style='text-align: left;'>"+ ProfitClass.OpeningClosing[1].bal.ToString("N0") + "</td>";
+            html += "</tr>";
+            html += "<tr>";
+            html += "<td class='margin_left_pl' colspan='4' style='background-color:#ccc'>CGS</td>";
+            html += "<td style = 'text-align: right;background-color:#ccc' >" + ProfitClass.Totals[0].bal.ToString("N0") + "</td>";
+            html += "</tr>";
+            html += "<tr>";
+            html += "<td class='margin_left_pl' colspan='4' style='color:red;font-weight:bold'>Gross Profit</td>";
+            html += "<td style = 'text-align: right;color:red;font-weight:bold' >"+ ProfitClass.Totals[1].bal.ToString("N0") + "</td>";
+            html += "</tr>";
+
+            // expense details start
+
+          
+            foreach(var acc in expAcc)
+            {
+                html += "<tr>";
+                html += "<td style = 'text-align:left' colspan='4' id='" + acc.isoperative+"'>"+acc.vartitle+"</td>";
+                html += "<td style = 'text-align:left' >"+acc.bal.ToString("N0") + " </td>";
+                html += "</tr>";
+            }
+           
+            // expense details end
+
+            html += "<tr>";
+            html += "<td class='margin_left_pl' colspan='4' style='background-color:#ccc'>Net Expense</td>";
+            html += "<td style = 'text-align: right;background-color:#ccc' >" + ProfitClass.Totals[2].bal.ToString("N0") + "</td>";
+            html += "</tr>";
+            html += "<tr>";
+            html += "<td class='margin_left_pl' colspan='4' style='color:red;font-weight:bold'>Net Profit</td>";
+            html += "<td style = 'text-align: right;color:red;font-weight:bold' >"+ ProfitClass.Totals[3].bal.ToString("N0") + "</td>";
+            html += "</tr>";
+            html += "</tbody>";
+            html += " </table>";
+            html += "</fieldset>";
+            html += "   </div>";
+            html += "</div>";
+
+
+          
+
+            // Render any HTML fragment or document to HTML
+            //var Renderer = new IronPdf.HtmlToPdf();
+            // var PDF = Renderer.RenderHtmlAsPdf(html);
+            var OutputPath = "PL" + DateTime.Now.ToString("ddmmyyhhmmss") + ".pdf";
+
+            //var fullPath = @"~/Areas/Accounts/PDF/" + OutputPath;
+
+            var path = Path.Combine(Server.MapPath("~/Areas/Accounts/PDF"), OutputPath);
+
+            //PDF.SaveAs(path);
+
+
+            htmlToPDF(path, html);
+
+
+
+           return OutputPath;
+          //  return "";
+
+            // return Json("String");
+        }
+
+
+        public void htmlToPDF(string path,string html)
+        {
+            string msg = "";
+
+
+            Document document = new Document();
+            try
+            {
+
+                //var filep=System.IO.File.Create(path);
+
+                PdfWriter writer = PdfWriter.GetInstance(document, new FileStream(path, FileMode.Create));
+
+
+                document.Open();
+
+                // for css implementation 
+
+                //List<string> cssFile = new List<string>();
+                //var cssPath   = Path.Combine(Server.MapPath("~/Areas/Accounts/PDF/CSS"), "PDFStyling.css");
+
+                //cssFile.Add(cssPath);
+
+                //HtmlPipelineContext htmlContext = new HtmlPipelineContext(null);
+                ////  htmlContext.SetTagFactory(Tags.GetHtmlTag)
+
+                //ICSSResolver cssResolver = XMLWorkerHelper.GetInstance().GetDefaultCssResolver(false);
+                //cssFile.ForEach(i => cssResolver.AddCssFile(System.Web.HttpContext.Current.Server.MapPath(i), true));
+                //IPipeline pipeline = new CssResolverPipeline(cssResolver, new HtmlPipeline(htmlContext, new PdfWriterPipeline(document, writer)));
+
+
+
+                // for css implementation 
+
+                WebClient wc = new WebClient();
+                // string htmlText = wc.DownloadString("http://localhost:59500/my.html");
+                string htmlText = html;
+                Response.Write(htmlText);
+                List<IElement> htmlarraylist = HTMLWorker.ParseToList(new StringReader(htmlText), null);
+                for (int k = 0; k < htmlarraylist.Count; k++)
+                {
+                    document.Add((IElement)htmlarraylist[k]);
+                }
+
+                document.Close();
+            }
+            catch (Exception e)
+            {
+                msg = e.Message + e.StackTrace;
+            }
+        }
+
+
+
+
+        [HttpPost]
+        public JsonResult getLoadAllStockView(string FromDate, string ToDate)
+        {
+            int i = 0;
+            string varwhere = "";
+           
+            var FDate = FromDate.Split('/');
+            var TDate = ToDate.Split('/');
+            string sqlFdate = FDate[2] + " - " + FDate[1] + "-" + FDate[0];
+            string sqlTdate = TDate[2] + "-" + TDate[1] + "-" + TDate[0];
+
+            if (ds.Tables["tblMaster"] != null)
+            {
+                ds.Tables["tblMaster"].Clear();
+            }
+            string query = "";
+            query += " WeavingProdCompanyBase.dbo.spLoadYarnStockInHand '2010-01-01','" + sqlTdate + "'," + sql.getClientId() + "";// drpYarn
+          
+            sql = new SqlClass();
+
+            DataTable dtLoad = sql.LoadData(query, "tblMaster");
+
+            System.Web.Script.Serialization.JavaScriptSerializer serializer = new System.Web.Script.Serialization.JavaScriptSerializer();
+            List<Dictionary<string, object>> rows = new List<Dictionary<string, object>>();
+            Dictionary<string, object> row;
+            foreach (DataRow dr in dtLoad.Rows)
+            {
+                row = new Dictionary<string, object>();
+                foreach (DataColumn col in dtLoad.Columns)
+                {
+                    row.Add(col.ColumnName, dr[col]);
+                }
+                rows.Add(row);
+                i++;
+            }
+            return Json(serializer.Serialize(rows));
+        }
+
+
+
+        [HttpPost]
+        public JsonResult LoadWeavingStockView(string FromDate, string ToDate)
+        {
+            int i = 0;
+            string varwhere = "";
+          
+            var FDate = FromDate.Split('/');
+            var TDate = ToDate.Split('/');
+            string sqlFdate = FDate[2] + "-" + FDate[1] + "-" + FDate[0];
+            string sqlTdate = TDate[2] + "-" + TDate[1] + "-" + TDate[0];
+
+            if (ds.Tables["tblMaster"] != null)
+            {
+                ds.Tables["tblMaster"].Clear();
+            }
+            string query = "";
+            query += "  WeavingProdCompanyBase.dbo.spLoadYarnAtWeaving '2010-01-01','" + sqlTdate + "'," + sql.getClientId() + " ";// drpYarn
+            sql = new SqlClass();
+
+            DataTable dtLoad = sql.LoadData(query, "tblMaster");
+
+
+            System.Web.Script.Serialization.JavaScriptSerializer serializer = new System.Web.Script.Serialization.JavaScriptSerializer();
+            List<Dictionary<string, object>> rows = new List<Dictionary<string, object>>();
+            Dictionary<string, object> row;
+            foreach (DataRow dr in dtLoad.Rows)
+            {
+                row = new Dictionary<string, object>();
+                foreach (DataColumn col in dtLoad.Columns)
+                {
+                    row.Add(col.ColumnName, dr[col]);
+                }
+                rows.Add(row);
+                i++;
+            }
+            return Json(serializer.Serialize(rows));
+        }
+
+        [HttpPost]
+        public JsonResult LoadFabricStockView(string FromDate)
+        {
+            int i = 0;
+            string varwhere = "";
+         
+            var FDate = FromDate.Split('/');
+            // var TDate = ToDate.Split('/');
+            string sqlFdate = FDate[2] + "-" + FDate[1] + "-" + FDate[0];
+            // string sqlTdate = TDate[2] + "-" + TDate[1] + "-" + TDate[0];
+
+            if (ds.Tables["tblMaster"] != null)
+            {
+                ds.Tables["tblMaster"].Clear();
+            }
+            string query = "";
+            query += "  WeavingProdCompanyBase.dbo.sploadFabricInHand " + sql.getClientId() + ",'" + sqlFdate + "'";// drpYarn
+            sql = new SqlClass();
+
+            DataTable dtLoad = sql.LoadData(query, "tblMaster");
+
+            System.Web.Script.Serialization.JavaScriptSerializer serializer = new System.Web.Script.Serialization.JavaScriptSerializer();
+            List<Dictionary<string, object>> rows = new List<Dictionary<string, object>>();
+            Dictionary<string, object> row;
+            foreach (DataRow dr in dtLoad.Rows)
+            {
+                row = new Dictionary<string, object>();
+                foreach (DataColumn col in dtLoad.Columns)
+                {
+                    row.Add(col.ColumnName, dr[col]);
+                }
+                rows.Add(row);
+                i++;
+            }
+            return Json(serializer.Serialize(rows));
+        }
+
+
+        public JsonResult DashChAccountDet(string dtFromDate, string Title)
+        {
+            Balances Bal = new Balances();
+            AMS_SAASEntities db = new AMS_SAASEntities();
+
+            var dtfdate = dtFromDate.Split('/');
+            string parmsFdate = dtfdate[2] + "-" + dtfdate[1] + "-" + dtfdate[0];
+            parmsFdate += " 23:59:59";
+            sql = new SqlClass();
+            string seqId = db.tblChartOfAccounts.FirstOrDefault(x => x.varTitle == Title).intSeqId.ToString();
+            string str = " spGetAccountBalanceDateWiseCons1_allSubAccounts '" + parmsFdate + "','" + seqId + "'," + sql.getCompanyId() + "," + sql.getBranchId();
+            DataTable dtLoad = sql.LoadData(str, "tblDashAccounts");
+            System.Web.Script.Serialization.JavaScriptSerializer serializer = new System.Web.Script.Serialization.JavaScriptSerializer();
+            List<Dictionary<string, object>> rows = new List<Dictionary<string, object>>();
+            Dictionary<string, object> row;
+            foreach (DataRow dr in dtLoad.Rows)
+            {
+                row = new Dictionary<string, object>();
+                foreach (DataColumn col in dtLoad.Columns)
+                {
+                    row.Add(col.ColumnName, dr[col]);
+                }
+                rows.Add(row);
+            }
+            return Json(serializer.Serialize(rows));
+        }
+        [HttpPost]
+        public JsonResult CashBankBalance(string dtTodate)
+        {
+            int ClientId = sql.getClientId();
+            Balances Bal = new Balances();
+            AMS_SAASEntities db = new AMS_SAASEntities();
+          //  string dtFromDate = DateTime.Now.ToShortDateString();
+            var dtfdate = dtTodate.Split('/');
+            string parmsFdate = dtfdate[2] + "-" + dtfdate[1] + "-" + dtfdate[0];
+            parmsFdate += " 23:59:59";
+            sql = new SqlClass();
+            int CashAcc = Convert.ToInt32(db.tblPreferences.Where(x => x.intClientId == ClientId).Select(x => x.intCashAccId).FirstOrDefault());
+            string varOldCashAccount = db.tblChartOfAccounts.FirstOrDefault(x => x.intSeqId == CashAcc && x.intClientId== ClientId).varOldAccount.ToString();
+            string str = " spGetAccountBalanceDateWiseCons1 '" + parmsFdate + "','" + varOldCashAccount + "'," + sql.getCompanyId() + "," + -2+","+sql.getClientId();
+            DataTable dtLoad = sql.LoadData(str, "tblBankBalance");
+            System.Web.Script.Serialization.JavaScriptSerializer serializer = new System.Web.Script.Serialization.JavaScriptSerializer();
+            List<Dictionary<string, object>> rows = new List<Dictionary<string, object>>();
+            Dictionary<string, object> row;
+            foreach (DataRow dr in dtLoad.Rows)
+            {
+                row = new Dictionary<string, object>();
+                foreach (DataColumn col in dtLoad.Columns)
+                {
+                    row.Add(col.ColumnName, dr[col]);
+                }
+                rows.Add(row);
+                Bal.Cash = Convert.ToDouble(rows[0]["bal"]);
+            }
+            int BankAcc = Convert.ToInt32(db.tblPreferences.Where(x => x.intClientId == ClientId).Select(x => x.intBankAccId).FirstOrDefault());
+            string varOdBanAccount = db.tblChartOfAccounts.FirstOrDefault(x => x.intSeqId == BankAcc && x.intClientId == ClientId).varOldAccount.ToString();
+            string str1 = " spGetAccountBalanceDateWiseCons1 '" + parmsFdate + "','" + varOdBanAccount + "'," + sql.getCompanyId() + "," + -2 + "," + sql.getClientId();
+            DataTable dtLod = sql.LoadData(str1, "tblBankBalance");
+            System.Web.Script.Serialization.JavaScriptSerializer serializers = new System.Web.Script.Serialization.JavaScriptSerializer();
+            List<Dictionary<string, object>> rows1 = new List<Dictionary<string, object>>();
+            Dictionary<string, object> row1;
+            foreach (DataRow dr in dtLod.Rows)
+            {
+                row1 = new Dictionary<string, object>();
+                foreach (DataColumn col in dtLod.Columns)
+                {
+                    row1.Add(col.ColumnName, dr[col]);
+                }
+                rows1.Add(row1);
+                Bal.Bank = Convert.ToDouble(rows1[0]["bal"]);
+            }
+            return Json(serializer.Serialize(Bal));
+        }
+        public JsonResult DebtorsCreditors(string dtTodate)
+        {
+            int ClientId = sql.getClientId();
+
+            Balances Bal = new Balances();
+            AMS_SAASEntities db = new AMS_SAASEntities();
+            //string dtFromDate = DateTime.Now.ToShortDateString();
+            var dtfdate = dtTodate.Split('/');
+            string parmsFdate = dtfdate[2] + "-" + dtfdate[1] + "-" + dtfdate[0];
+            parmsFdate += " 23:59:59";
+            sql = new SqlClass();
+            int cid = sql.getClientId();
+            int TradeDebtorAcc = Convert.ToInt32(db.tblPreferences.Where(x => x.intClientId == ClientId).Select(x => x.intTradeDebt).FirstOrDefault());
+            string varOldAccount = db.tblChartOfAccounts.FirstOrDefault(x => x.intSeqId == TradeDebtorAcc && x.intClientId == ClientId).varOldAccount.ToString();
+            //string str = " spGetAccountBalanceDateWiseCons1 '" + parmsFdate + "','" + varOldAccount + "'," + sql.getCompanyId() + "," + -2 + "," + ClientId;
+            //DataTable dtLoad = sql.LoadData(str, "tblDebtors");
+            System.Web.Script.Serialization.JavaScriptSerializer serializer = new System.Web.Script.Serialization.JavaScriptSerializer();
+            //List<Dictionary<string, object>> rows = new List<Dictionary<string, object>>();
+            //Dictionary<string, object> row;
+            //foreach (DataRow dr in dtLoad.Rows)
+            //{
+            //    row = new Dictionary<string, object>();
+            //    foreach (DataColumn col in dtLoad.Columns)
+            //    {
+            //        row.Add(col.ColumnName, dr[col]);
+            //    }
+            //    rows.Add(row);
+            //    Bal.Debtors = Convert.ToDouble(rows[0]["bal"]);
+            //}
+
+            var isNotCreDebPosNegCombine = db.tblCompanies.FirstOrDefault(x => x.intClientId == cid).isNotCreDebPosNegCombine.ToString();
+
+            if (isNotCreDebPosNegCombine == "")
+            {
+                isNotCreDebPosNegCombine = "True";
+            }
+
+
+            List<spGetAccBalBtDtIsOpAstLblty_Result> BalList = db.Database.SqlQuery<spGetAccBalBtDtIsOpAstLblty_Result>("spGetAccBalBtDtIsOpAstLblty '2001-01-01','" + parmsFdate + "'," + sql.getCompanyId() + "," + -2 + "," + ClientId).ToList();
+
+
+            if (isNotCreDebPosNegCombine == "False")
+            {
+                string debterId = db.tblPreferences.FirstOrDefault(x => x.intClientId == cid).intTradeDebt.ToString();
+                string strDeb = " spGetAccountBalancesByParentId '" + parmsFdate + "','" + debterId + "'," + sql.getClientId();
+                DataTable dtLoadDeb = sql.LoadData(strDeb, "spGetAccountBalancesByParentId");
+
+                //  List<Dictionary<string, object>> rowsDeb = new List<Dictionary<string, object>>();
+                // Dictionary<string, object> rowDeb;
+
+                Bal.Debtors = Convert.ToDouble(dtLoadDeb.Compute("Sum(Bal)",string.Empty));
+
+                //foreach (DataRow dr in dtLoadDeb.Rows)
+                //{
+                // rowDeb = new Dictionary<string, object>();
+                //    foreach (DataColumn col in dtLoadDeb.Columns)
+                //    {
+                //        rowDeb.Add(col.ColumnName, dr[col]);
+                //        debtBal += col.
+                //    }
+                //  rowsDeb.Add(rowDeb);
+                //}
+                //  return Json(serializer.Serialize(rowsDeb));
+            }
+            else
+            {
+
+                Bal.Debtors = Convert.ToDouble(BalList.Where(x => x.Bal > 0).Sum(x => x.Bal));
+            }
+
+
+            if (isNotCreDebPosNegCombine == "False")
+            {
+                string creId = db.tblPreferences.FirstOrDefault(x => x.intClientId == cid).intTradeCredit.ToString();
+                string strDeb = " spGetAccountBalancesByParentId '" + parmsFdate + "','" + creId + "'," + sql.getClientId();
+                DataTable dtLoadCre = sql.LoadData(strDeb, "spGetAccountBalancesByParentId");
+
+                Bal.Creditors = Convert.ToDouble(dtLoadCre.Compute("Sum(Bal)",string.Empty));
+                //List<Dictionary<string, object>> rowsCre = new List<Dictionary<string, object>>();
+                //Dictionary<string, object> rowCre;
+                //foreach (DataRow dr in dtLoadCre.Rows)
+                //{
+                //    rowCre = new Dictionary<string, object>();
+                //    foreach (DataColumn col in dtLoadCre.Columns)
+                //    {
+                //        rowCre.Add(col.ColumnName, dr[col]);
+                //    }
+                //    rowsCre.Add(rowCre);
+                //}
+                //return Json(serializer.Serialize(rowsCre));
+            }
+            else
+            {
+                Bal.Creditors = Convert.ToDouble(BalList.Where(x => x.Bal < 0).Sum(x => x.Bal));
+            }
+
+       
+            
+            //int TradeCreditorAcc = Convert.ToInt32(db.tblPreferences.Where(x => x.intClientId == ClientId).Select(x => x.intTradeCredit).FirstOrDefault());
+            //string varOldAcount = db.tblChartOfAccounts.FirstOrDefault(x => x.intSeqId == TradeCreditorAcc && x.intClientId == ClientId).varOldAccount.ToString();
+            //string str1 = " spGetAccountBalanceDateWiseCons1 '" + parmsFdate + "','" + varOldAcount + "'," + sql.getCompanyId() + "," + -2 + "," + sql.getClientId();
+            //DataTable dtLod = sql.LoadData(str1, "tblCreditors");
+            //System.Web.Script.Serialization.JavaScriptSerializer serializers = new System.Web.Script.Serialization.JavaScriptSerializer();
+            //List<Dictionary<string, object>> rows1 = new List<Dictionary<string, object>>();
+            //Dictionary<string, object> row1;
+            //foreach (DataRow dr in dtLod.Rows)
+            //{
+            //    row = new Dictionary<string, object>();
+            //    foreach (DataColumn col in dtLod.Columns)
+            //    {
+            //        row.Add(col.ColumnName, dr[col]);
+            //    }
+            //    rows1.Add(row);
+            //    Bal.Creditors = Convert.ToDouble(rows1[0]["bal"]);
+            //}
+
+            //Stock Balance
+            //getting closing from weaving
+            //var client = new WebClient();
+            //PLClass opclosing = new PLClass();
+            //string urlcl = System.Configuration.ConfigurationManager.AppSettings["Weaving"] + "/ApiApp/API/FabricClosingAmount/" + sql.getClientId() + "/" + "2001-01-01" + "/" + parmsFdate;
+            //var CL = client.DownloadString(urlcl);
+            //Bal.Stock = Convert.ToDouble(CL);
+
+          
+            return Json(serializer.Serialize(Bal));
+        }
+
+        public ActionResult getSumaaryPayMentReceiptsFromToDate(string accId, string Option)
+        {
+            sql.SaveTimeCons("Dashboard", "getSumaaryPayMentReceiptsFromToDate", "Function Starting");
+            DateTime dtTo = DateTime.Now;
+            DateTime parmsFdate = DateTime.Now.AddDays(-7);
+            Balances Bal = new Balances();
+            AMS_SAASEntities db = new AMS_SAASEntities();
+            int ClientId = sql.getClientId();
+            string str2 = " ";
+
+            if (Option=="week")
+            {
+                dtTo = DateTime.Now;
+                parmsFdate = DateTime.Now.AddDays(-7);
+                str2 = " [spGetCashBookBalancesFromToDate] '" + parmsFdate.ToString("yyyy-MM-dd") + "','" + dtTo.ToString("yyyy-MM-dd") + "','" + accId + "',-2," + sql.getClientId();
+            }
+            else
+            {
+                DateTime dtCurrent = DateTime.Now;
+                //parmsFdate = new DateTime(dtCurrent.Year, 1, 1);
+                parmsFdate = dtCurrent.AddMonths(-5);
+                parmsFdate = new DateTime(parmsFdate.Year, parmsFdate.Month, 1);
+                int currentMonthDays = DateTime.DaysInMonth(dtCurrent.Year, dtCurrent.Month);
+                dtTo = new DateTime(dtCurrent.Year, dtCurrent.Month, currentMonthDays);
+
+                str2 = " [spGetCashBookBalancesFromToDateMonthWise] '" + parmsFdate.ToString("yyyy-MM-dd") + "','" + dtTo.ToString("yyyy-MM-dd") + "','" + accId + "',-2," + sql.getClientId();
+            }
+
+         
+
+         
+            DataTable dtLoadDeb = sql.LoadData(str2, "spGetCashBookBalancesFromToDate");
+
+
+            System.Web.Script.Serialization.JavaScriptSerializer serializersExp = new System.Web.Script.Serialization.JavaScriptSerializer();
+            List<GetMorrisCharPaymentReceipt> li = new List<GetMorrisCharPaymentReceipt>();
+
+            //GetMorrisCharPaymentReceipt dt = new GetMorrisCharPaymentReceipt("2017/05/21", 100, 200);
+            //GetMorrisCharPaymentReceipt dt1 = new GetMorrisCharPaymentReceipt("2017/05/21", 100, 200);
+            //GetMorrisCharPaymentReceipt dt2 = new GetMorrisCharPaymentReceipt("2017/05/21", 100, 200);
+
+            foreach (DataRow dr in dtLoadDeb.Rows)
+            {
+
+                li.Add(new GetMorrisCharPaymentReceipt(dr["dtVoucherDate"].ToString(),Convert.ToDouble(dr["Payments"]).ToString("N0"), Convert.ToDouble(dr["Receipts"]).ToString("N0")));
+            }
+
+            //li.Add(dt);
+            //li.Add(dt1);
+            //li.Add(dt2);
+
+            // return Json(serializersExp.Serialize(li));
+            sql.SaveTimeCons("Dashboard", "getSumaaryPayMentReceiptsFromToDate", "Function End");
+            return Json(li);
+
+        }
+        public JsonResult DrpBankAccounts()
+        {
+            sql.SaveTimeCons("Dashboard", "DrpBankAccounts", "Function Start");
+            int clientid = sql.getClientId();
+            AMS_SAASEntities db = new AMS_SAASEntities();
+            int cashid = int.Parse(db.tblPreferences.Where(x => x.intClientId == clientid).SingleOrDefault().intCashAccId.ToString());
+            var list = from a in db.tblChartOfAccounts
+                           //join c in db.tblCountries on a.intCountryId equals c.intCountryId
+                           //join c in db.tblCountries on new {a.intClientId,a.intCountryId } equals new {c.intClientId,c.intCountryId } into temp
+                           //from x in temp.DefaultIfEmpty()
+                       where a.isActive == true && a.isOperative == true && a.intParentAccountId == cashid
+                       && (a.intClientId == clientid)
+                       orderby a.varTitle
+                       select new
+                       {
+                           id = a.intSeqId,
+                           varTitle = a.varTitle //"Dr" + a.varAccountNo + " - " + 
+                       };
+            //join b in BillSub on new { a.Ref, a.Billing } equals { b.Ref,b.Billing}
+            //into res
+            sql.SaveTimeCons("Dashboard", "DrpBankAccounts", "Function End");
+            return Json(list, JsonRequestBehavior.AllowGet);
+        }
+        [HttpPost]
+        public JsonResult LoadMasterGrid_YarnSaleSummaryAllItems(string Option)
+        {
+            int i = 0;
+            string varwhere = "";
+            string sqlFdate = "";
+            string sqlTdate = "";
+
+            string query = "";
+
+
+
+
+            DateTime dtTo = DateTime.Now;
+            DateTime parmsFdate = DateTime.Now.AddDays(-7);
+
+            if (Option == "week")
+            {
+                dtTo = DateTime.Now;
+                parmsFdate = DateTime.Now.AddDays(-7);
+
+
+            }
+            else
+            {
+                DateTime dtCurrent = DateTime.Now;
+                //parmsFdate = new DateTime(dtCurrent.Year, 1, 1);
+                parmsFdate = dtCurrent.AddMonths(-5);
+                parmsFdate = new DateTime(parmsFdate.Year, parmsFdate.Month, 1);
+                int currentMonthDays = DateTime.DaysInMonth(dtCurrent.Year, dtCurrent.Month);
+                dtTo = new DateTime(dtCurrent.Year, dtCurrent.Month, currentMonthDays);
+            }
+
+            string FromDate = parmsFdate.ToString("dd/MM/yyyy");
+            string ToDate = dtTo.ToString("dd/MM/yyyy");
+
+            if ((FromDate != null) && (ToDate != null))
+            {
+                if ((FromDate != "") && (ToDate != ""))
+                {
+                    var FDate = FromDate.Split('/');
+                    var TDate = ToDate.Split('/');
+                    sqlFdate = FDate[2] + "-" + FDate[1] + "-" + FDate[0];
+                    sqlTdate = TDate[2] + "-" + TDate[1] + "-" + TDate[0];
+
+                    varwhere += " and (Convert(date,M.dtVoucherDate) >= ''" + sqlFdate + "'' and Convert(date,M.dtVoucherDate) <= ''" + sqlTdate + "'' ) ";
+                }
+            }
+
+            if (Option == "week")
+            {
+
+                query += " [WeavingProdCompanyBase].[dbo].[spLoadYarnSaleSummaryWiseAllItems] " + sql.getClientId() + ",'" + varwhere + "' ";
+            }
+            else
+            {
+                query += " [WeavingProdCompanyBase].[dbo].[spLoadYarnSaleSummaryWiseAllItemsMonthWise] " + sql.getClientId() + ",'" + varwhere + "' ";
+            }
+
+            if (ds.Tables["tblMasterSummary"] != null)
+            {
+                ds.Tables["tblMasterSummary"].Clear();
+            }
+
+            //  bll.loadData(ref ds, query, "tblMasterSummary");
+
+            DataTable tblAccountLedger = sql.LoadData(query, "tblMasterSummary");
+            System.Web.Script.Serialization.JavaScriptSerializer serializer = new System.Web.Script.Serialization.JavaScriptSerializer();
+            List<GetMorrisCharSale_NetSale> li = new List<GetMorrisCharSale_NetSale>();
+
+            foreach (DataRow dr in tblAccountLedger.Rows)
+            {
+
+                li.Add(new GetMorrisCharSale_NetSale(dr["dtVoucherDate"].ToString(), Convert.ToInt32(dr["SaleAmount"]), Convert.ToInt32(dr["NetSale"])));
+            }
+
+
+            return Json(li);
+        }
+
+
+        [HttpPost]
+        public JsonResult LoadMasterGrid_YarnSaleSummaryDivs()
+        {
+            sql.SaveTimeCons("Dashboard", "LoadMasterGrid_YarnSaleSummaryDivs", "Function Starting");
+            int i = 0;
+            string varwhere = "";
+            string sqlFdate = "";
+            string sqlTdate = "";
+            string query = "";
+            GetSale_NetSaleSummary summary = new GetSale_NetSaleSummary();
+            DateTime dtTo = DateTime.Now;
+
+            DateTime parmsFdate = DateTime.Now;
+            varwhere = " and (Convert(date,M.dtVoucherDate) >= ''" + parmsFdate.ToString("yyyy-MM-dd") + "'' and Convert(date,M.dtVoucherDate) <= ''" + dtTo.ToString("yyyy-MM-dd") + "'' ) ";
+            query = " [WeavingProdCompanyBase].[dbo].[spLoadYarnSaleSummaryWiseTWMA] " + sql.getClientId() + ",'" + varwhere + "' ";
+            DataTable tblToday = sql.LoadData(query, "tblMasterSummaryToday");
+            summary.TodaySale = Convert.ToDouble(tblToday.Rows[0]["NetSale"]).ToString("N0");
+
+            dtTo = DateTime.Now;
+            parmsFdate = DateTime.Now.AddDays(-7);
+            varwhere = " and (Convert(date,M.dtVoucherDate) >= ''" + parmsFdate.ToString("yyyy-MM-dd") + "'' and Convert(date,M.dtVoucherDate) <= ''" + dtTo.ToString("yyyy-MM-dd") + "'' ) ";
+            query = " [WeavingProdCompanyBase].[dbo].[spLoadYarnSaleSummaryWiseTWMA] " + sql.getClientId() + ",'" + varwhere + "' ";
+            DataTable tblWeek = sql.LoadData(query, "tblMasterSummaryWeek");
+            summary.WeekSale = Convert.ToDouble(tblWeek.Rows[0]["NetSale"]).ToString("N0");
+
+            DateTime dtCurrent = DateTime.Now;
+            parmsFdate = new DateTime(dtCurrent.Year, dtCurrent.Month, 1);
+            int currentMonthDays = DateTime.DaysInMonth(parmsFdate.Year, parmsFdate.Month);
+            dtTo = new DateTime(parmsFdate.Year, parmsFdate.Month, currentMonthDays);
+
+            varwhere = " and (Convert(date,M.dtVoucherDate) >= ''" + parmsFdate.ToString("yyyy-MM-dd") + "'' and Convert(date,M.dtVoucherDate) <= ''" + dtTo.ToString("yyyy-MM-dd") + "'' ) ";
+            query = " [WeavingProdCompanyBase].[dbo].[spLoadYarnSaleSummaryWiseTWMA] " + sql.getClientId() + ",'" + varwhere + "' ";
+            DataTable tblMonth = sql.LoadData(query, "tblMasterSummaryMonth");
+            summary.MonthSale = Convert.ToDouble(tblMonth.Rows[0]["NetSale"]).ToString("N0");
+
+            dtCurrent = DateTime.Now;
+            parmsFdate = new DateTime(dtCurrent.Year, 1, 1);
+            dtTo = new DateTime(parmsFdate.Year, 12, 31);
+
+            varwhere = " and (Convert(date,M.dtVoucherDate) >= ''" + parmsFdate.ToString("yyyy-MM-dd") + "'' and Convert(date,M.dtVoucherDate) <= ''" + dtTo.ToString("yyyy-MM-dd") + "'' ) ";
+            query = " [WeavingProdCompanyBase].[dbo].[spLoadYarnSaleSummaryWiseTWMA] " + sql.getClientId() + ",'" + varwhere + "' ";
+            DataTable tblAnnual = sql.LoadData(query, "tblMasterSummaryAnnual");
+            summary.AnnualSale = Convert.ToDouble(tblAnnual.Rows[0]["NetSale"]).ToString("N0");
+
+            sql.SaveTimeCons("Dashboard", "LoadMasterGrid_YarnSaleSummaryDivs", "Function End");
+
+            //  bll.loadData(ref ds, query, "tblMasterSummary");
+
+
+            //   System.Web.Script.Serialization.JavaScriptSerializer serializer = new System.Web.Script.Serialization.JavaScriptSerializer();
+
+
+
+
+            return Json(summary);
+        }
+        public ActionResult GetExpense_Revenue( )
+        {
+            DateTime dtTo = DateTime.Now;
+            DateTime parmsFdate = DateTime.Now.AddDays(-7);
+            Balances Bal = new Balances();
+            AMS_SAASEntities db = new AMS_SAASEntities();
+            int ClientId = sql.getClientId();
+
+            string accId = "5";
+
+
+                DateTime dtCurrent = DateTime.Now;
+               
+            string strExpense = " spGetAccountBalanceDateWiseCons1 '" + dtCurrent.ToString("yyyy-MM-dd")  + " 23:59:59', 5 ," + sql.getCompanyId() + "," + -2 + "," + sql.getClientId();
+            DataTable dtLoadExpense = sql.LoadData(strExpense, "spGetExpense");
+
+            string strRevenue = " spGetAccountBalanceDateWiseCons1 '" + dtCurrent.ToString("yyyy-MM-dd") + " 23:59:59',4 ," + sql.getCompanyId() + "," + -2 + "," + sql.getClientId();
+            DataTable dtLoadRevenue = sql.LoadData(strRevenue, "spGetRevenue");
+
+            System.Web.Script.Serialization.JavaScriptSerializer serializersExp = new System.Web.Script.Serialization.JavaScriptSerializer();
+            List<GetMorrisCharPaymentReceipt> li = new List<GetMorrisCharPaymentReceipt>();
+
+            //GetMorrisCharPaymentReceipt dt = new GetMorrisCharPaymentReceipt("2017/05/21", 100, 200);
+            //GetMorrisCharPaymentReceipt dt1 = new GetMorrisCharPaymentReceipt("2017/05/21", 100, 200);
+            //GetMorrisCharPaymentReceipt dt2 = new GetMorrisCharPaymentReceipt("2017/05/21", 100, 200);
+
+            string []arr = new string[5];
+
+            double exp= Convert.ToDouble(dtLoadExpense.Rows[0]["bal"]);
+            double rev= (Convert.ToDouble(dtLoadRevenue.Rows[0]["bal"]) * -1);
+            double totalAmount = exp + rev;
+
+            double expTotal = (exp / totalAmount) * 100 ;
+                double revTotal = (rev / totalAmount) *100 ;
+
+            arr[0]= exp.ToString("N0");
+            arr[1] = rev.ToString("N0");
+            arr[2] = expTotal.ToString("0.##");
+            arr[3] = revTotal.ToString("0.##");
+
+
+
+
+
+            return Json(arr);
+
+        }
+
+        public JsonResult GetBalances(string dtfromDate, string dtTodate)
+        {
+
+            sql.SaveTimeCons("Dashboard", "GetBalances", "Function Starting");
+            Balances Bal = new Balances();
+            AMS_SAASEntities db = new AMS_SAASEntities();
+            int ClientId = sql.getClientId();
+            //    string dtFromDate = DateTime.Now.ToShortDateString();
+            var dtfdate = dtfromDate.Split('/');
+            string parmsFdate = dtfdate[2] + "-" + dtfdate[1] + "-" + dtfdate[0];
+            parmsFdate += " 23:59:59";
+            var dttdate = dtTodate.Split('/');
+            string parmsTdate = dttdate[2] + "-" + dttdate[1] + "-" + dttdate[0];
+            parmsTdate += " 23:59:59";
+            int cid = sql.getClientId();
+
+            var isNotCreDebPosNegCombine = db.tblCompanies.FirstOrDefault(x => x.intClientId == cid).isNotCreDebPosNegCombine.ToString();
+
+            if (isNotCreDebPosNegCombine == "")
+            {
+                isNotCreDebPosNegCombine = "True";
+            }
+        
+            sql = new SqlClass();
+
+            //int TradeDebtorAcc = Convert.ToInt32(db.tblPreferences.Where(x => x.intClientId == ClientId).Select(x => x.intTradeDebt).FirstOrDefault());
+            //string varOldAccount = db.tblChartOfAccounts.FirstOrDefault(x => x.intSeqId == TradeDebtorAcc && x.intClientId == ClientId).varOldAccount.ToString();
+            System.Web.Script.Serialization.JavaScriptSerializer serializer = new System.Web.Script.Serialization.JavaScriptSerializer();
+            //List<spGetAccBalBtDtIsOpAstLblty_Result> BalList = db.Database.SqlQuery<spGetAccBalBtDtIsOpAstLblty_Result>("spGetAccBalBtDtIsOpAstLblty '2001-01-01','" + parmsTdate + "'," + sql.getCompanyId() + "," + -2 + "," + ClientId).ToList();
+            //if (isNotCreDebPosNegCombine == "False")
+            //{
+            //    string debterId = db.tblPreferences.FirstOrDefault(x => x.intClientId == cid).intTradeDebt.ToString();
+            //    string strDeb = " spGetAccountBalancesByParentId '" + parmsFdate + "','" + debterId + "'," + sql.getClientId();
+            //    DataTable dtLoadDeb = sql.LoadData(strDeb, "spGetAccountBalancesByParentId");
+
+            //    //  List<Dictionary<string, object>> rowsDeb = new List<Dictionary<string, object>>();
+            //    // Dictionary<string, object> rowDeb;
+
+            //    Bal.Debtors = Convert.ToDouble(dtLoadDeb.Compute("Sum(Bal)", string.Empty));
+
+            //    //foreach (DataRow dr in dtLoadDeb.Rows)
+            //    //{
+            //    // rowDeb = new Dictionary<string, object>();
+            //    //    foreach (DataColumn col in dtLoadDeb.Columns)
+            //    //    {
+            //    //        rowDeb.Add(col.ColumnName, dr[col]);
+            //    //        debtBal += col.
+            //    //    }
+            //    //  rowsDeb.Add(rowDeb);
+            //    //}
+            //    //  return Json(serializer.Serialize(rowsDeb));
+            //}
+            //else
+            //{
+
+            //    Bal.Debtors = Convert.ToDouble(BalList.Where(x => x.Bal > 0).Sum(x => x.Bal));
+            //}
+
+            //if (isNotCreDebPosNegCombine == "False")
+            //{
+            //    string creId = db.tblPreferences.FirstOrDefault(x => x.intClientId == cid).intTradeCredit.ToString();
+            //    string strDeb = " spGetAccountBalancesByParentId '" + parmsFdate + "','" + creId + "'," + sql.getClientId();
+            //    DataTable dtLoadCre = sql.LoadData(strDeb, "spGetAccountBalancesByParentId");
+
+            //    Bal.Creditors = Convert.ToDouble(dtLoadCre.Compute("Sum(Bal)", string.Empty));
+            //    //List<Dictionary<string, object>> rowsCre = new List<Dictionary<string, object>>();
+            //    //Dictionary<string, object> rowCre;
+            //    //foreach (DataRow dr in dtLoadCre.Rows)
+            //    //{
+            //    //    rowCre = new Dictionary<string, object>();
+            //    //    foreach (DataColumn col in dtLoadCre.Columns)
+            //    //    {
+            //    //        rowCre.Add(col.ColumnName, dr[col]);
+            //    //    }
+            //    //    rowsCre.Add(rowCre);
+            //    //}
+            //    //return Json(serializer.Serialize(rowsCre));
+            //}
+            //else
+            //{
+            //    Bal.Creditors = Convert.ToDouble(BalList.Where(x => x.Bal < 0).Sum(x => x.Bal));
+            //}
+            Bal.Debtors = 0;
+            Bal.Creditors = 0;
+            sql.SaveTimeCons("Dashboard", "GetBalances", "Debots And Creditors Loaded");
+            //Cash And Bank Balances
+
+            sql = new SqlClass();
+            int CashAcc = Convert.ToInt32(db.tblPreferences.Where(x => x.intClientId == ClientId).Select(x => x.intCashAccId).FirstOrDefault());
+            string varOldCashAccount = db.tblChartOfAccounts.FirstOrDefault(x => x.intSeqId == CashAcc && x.intClientId == ClientId).varOldAccount.ToString();
+            string str = " spGetAccountBalanceDateWiseCons1 '" + parmsTdate + "','" + varOldCashAccount + "'," + sql.getCompanyId() + "," + -2 + "," + sql.getClientId();
+            DataTable dtLoad = sql.LoadData(str, "tblBankBalance");
+           // System.Web.Script.Serialization.JavaScriptSerializer serializer = new System.Web.Script.Serialization.JavaScriptSerializer();
+            List<Dictionary<string, object>> rows = new List<Dictionary<string, object>>();
+            Dictionary<string, object> row;
+            foreach (DataRow dr in dtLoad.Rows)
+            {
+                row = new Dictionary<string, object>();
+                foreach (DataColumn col in dtLoad.Columns)
+                {
+                    row.Add(col.ColumnName, dr[col]);
+                }
+                rows.Add(row);
+                Bal.Cash = Convert.ToDouble(rows[0]["bal"]);
+            }
+            int BankAcc = Convert.ToInt32(db.tblPreferences.Where(x => x.intClientId == ClientId).Select(x => x.intBankAccId).FirstOrDefault());
+            string varOdBanAccount = db.tblChartOfAccounts.FirstOrDefault(x => x.intSeqId == BankAcc && x.intClientId == ClientId).varOldAccount.ToString();
+            string str1 = " spGetAccountBalanceDateWiseCons1 '" + parmsTdate + "','" + varOdBanAccount + "'," + sql.getCompanyId() + "," + -2 + "," + sql.getClientId();
+            DataTable dtLod = sql.LoadData(str1, "tblBankBalance");
+            System.Web.Script.Serialization.JavaScriptSerializer serializers = new System.Web.Script.Serialization.JavaScriptSerializer();
+            List<Dictionary<string, object>> rows1 = new List<Dictionary<string, object>>();
+            Dictionary<string, object> row1;
+            foreach (DataRow dr in dtLod.Rows)
+            {
+                row1 = new Dictionary<string, object>();
+                foreach (DataColumn col in dtLod.Columns)
+                {
+                    row1.Add(col.ColumnName, dr[col]);
+                }
+                rows1.Add(row1);
+                Bal.Bank = Convert.ToDouble(rows1[0]["bal"]);
+            }
+
+            sql.SaveTimeCons("Dashboard", "GetBalances", "Cash And Bank Load");
+            //Sale Purchase Balances
+
+            int Days = db.Database.SqlQuery<int>("select Convert(int,DateDiff(DAY,Convert(DateTime, '" + parmsFdate + "'),Convert(DateTime,'" + parmsTdate + "' ))) dtDiff").FirstOrDefault();
+            sql = new SqlClass();
+            int SaleAcc = Convert.ToInt32(db.tblPreferences.Where(x => x.intClientId == ClientId).Select(x => x.intSaleAccId).FirstOrDefault());
+            string varOldAccountpur = db.tblChartOfAccounts.FirstOrDefault(x => x.intSeqId == SaleAcc && x.intClientId==ClientId).varOldAccount.ToString();
+            string strpur = " spGetAccountBalanceBetweenDatesCons1 '" + parmsFdate + "','" + parmsTdate + "','" + varOldAccountpur + "'," + sql.getCompanyId() + "," + -2 + "," + sql.getClientId();
+            DataTable dtLoadpur = sql.LoadData(strpur, "tblSale");
+           // System.Web.Script.Serialization.JavaScriptSerializer serializer = new System.Web.Script.Serialization.JavaScriptSerializer();
+            List<Dictionary<string, object>> rowsSale = new List<Dictionary<string, object>>();
+           // Dictionary<string, object> row;
+            foreach (DataRow dr in dtLoadpur.Rows)
+            {
+                row = new Dictionary<string, object>();
+                foreach (DataColumn col in dtLoadpur.Columns)
+                {
+                    row.Add(col.ColumnName, dr[col]);
+                }
+                rowsSale.Add(row);
+                Bal.Sale = Convert.ToDouble(rowsSale[0]["bal"]);
+            }
+            int PurchaseAcc = Convert.ToInt32(db.tblPreferences.Where(x => x.intClientId == ClientId).Select(x => x.intPurchaseAccId).FirstOrDefault());
+            string varOldAcountSale = db.tblChartOfAccounts.FirstOrDefault(x => x.intSeqId == PurchaseAcc && x.intClientId==ClientId).varOldAccount.ToString();
+            string str1Sale = " spGetAccountBalanceBetweenDatesCons1 '" + parmsFdate + "','" + parmsTdate + "','" + varOldAcountSale + "'," + sql.getCompanyId() + "," + -2 + "," + sql.getClientId();
+            DataTable dtLodSale = sql.LoadData(str1Sale, "tblPurchase");
+            // System.Web.Script.Serialization.JavaScriptSerializer serializers = new System.Web.Script.Serialization.JavaScriptSerializer();
+            List<Dictionary<string, object>> rowspur = new List<Dictionary<string, object>>();
+          //  Dictionary<string, object> row;
+            foreach (DataRow dr in dtLodSale.Rows)
+            {
+                row = new Dictionary<string, object>();
+                foreach (DataColumn col in dtLodSale.Columns)
+                {
+                    row.Add(col.ColumnName, dr[col]);
+                }
+                rowspur.Add(row);
+                Bal.Purchase = Convert.ToDouble(rowspur[0]["bal"]);
+            }
+            sql.SaveTimeCons("Dashboard", "GetBalances", "Sale Purchase Loaded");
+            //Expense balance
+            //int ExpAcc = Convert.ToInt32(db.tblPreferences.Where(x => x.intClientId == ClientId).Select(x => x.intExpAccId).FirstOrDefault());
+            //string varExpOldAcount = db.tblChartOfAccounts.FirstOrDefault(x => x.intSeqId == ExpAcc && x.intClientId==ClientId).varOldAccount.ToString();
+            //string strexp = " spGetAccountBalanceBetweenDatesCons1 '" + parmsFdate + "','" + parmsTdate + "','" + varExpOldAcount + "'," + sql.getCompanyId() + "," + -2 + "," + sql.getClientId();
+            //DataTable dtLodExp = sql.LoadData(strexp, "tblExp");
+            //System.Web.Script.Serialization.JavaScriptSerializer serializersExp = new System.Web.Script.Serialization.JavaScriptSerializer();
+            //List<Dictionary<string, object>> rowsExp = new List<Dictionary<string, object>>();
+            //// Dictionary<string, object> row1;
+            //foreach (DataRow dr in dtLodExp.Rows)
+            //{
+            //    row = new Dictionary<string, object>();
+            //    foreach (DataColumn col in dtLodExp.Columns)
+            //    {
+            //        row.Add(col.ColumnName, dr[col]);
+            //    }
+            //    rowsExp.Add(row);
+            //    Bal.Expense = Convert.ToDouble(rowsExp[0]["bal"]);
+            //}
+
+
+            //Bal.Expense = Bal.Expense - Bal.Purchase;
+
+            sql.SaveTimeCons("Dashboard", "GetBalances", "Expense Load and Function End");
+
+            return Json(serializer.Serialize(Bal));
+        }
+        public JsonResult GetStockBalance(string dtTodate)
+        {
+            int ClientId = sql.getClientId();
+
+            Balances Bal = new Balances();
+            AMS_SAASEntities db = new AMS_SAASEntities();
+            //string dtFromDate = DateTime.Now.ToShortDateString();
+            var dtfdate = dtTodate.Split('/');
+            string parmsFdate = dtfdate[2] + "-" + dtfdate[1] + "-" + dtfdate[0];
+            parmsFdate += " 23:59:59";
+            sql = new SqlClass();
+          
+            System.Web.Script.Serialization.JavaScriptSerializer serializer = new System.Web.Script.Serialization.JavaScriptSerializer();
+
+            //Stock Balance
+            //getting closing from weaving
+            var client = new WebClient();
+            PLClass opclosing = new PLClass();
+            string urlcl = System.Configuration.ConfigurationManager.AppSettings["Weaving"] + "/ApiApp/API/FabricClosingAmount/" + sql.getClientId() + "/" + "2001-01-01" + "/" + parmsFdate;
+            var CL = client.DownloadString(urlcl);
+            Bal.Stock = Convert.ToDouble(CL);
+
+
+            return Json(serializer.Serialize(Bal));
+        }
+
+        public JsonResult LoadCashChart()
+        {
+           CASHINOUT MonthList = new CASHINOUT();
+            int i = 0;
+            int clientid = sql.getClientId();
+            AMS_SAASEntities AMS = new AMS_SAASEntities();
+            int CashBalAcc = Convert.ToInt32(AMS.tblPreferences.Where(x => x.intClientId == clientid).Select(x => x.intCashAccId).FirstOrDefault());
+            int CashOldAcc = Convert.ToInt32(AMS.tblChartOfAccounts.Where(x=>x.intSeqId==CashBalAcc && x.intClientId==clientid).Select(x=>x.varOldAccount).FirstOrDefault());
+            string varwhere = "2018,"+ CashOldAcc + ","+sql.getCompanyId()+",-2,"+clientid+"";
+            //and (varStatus = ''Confirmed'' OR varStatus = ''Paid'')
+            SqlParameter[] parameters =
+            {
+            new SqlParameter("@where",varwhere)
+            };
+
+
+            if (ds.Tables["tbltemp"] != null)
+            {
+
+                ds.Tables["tbltemp"].Clear();
+            }
+
+            string sr = "spLoadCashInOutChart " + varwhere + "";
+            DataTable tblTemp = sql.LoadData(sr, "tbltemp");
+
+            MonthList.Jan= tblTemp.Compute("sum(bal)", "MonthNum=1").ToString();
+            MonthList.Feb = tblTemp.Compute("sum(bal)", "MonthNum=2").ToString();
+            MonthList.Mar = tblTemp.Compute("sum(bal)", "MonthNum=3").ToString();
+            MonthList.April = tblTemp.Compute("sum(bal)", "MonthNum=4").ToString();
+            MonthList.May = tblTemp.Compute("sum(bal)", "MonthNum=5").ToString();
+            MonthList.June = tblTemp.Compute("sum(bal)", "MonthNum=6").ToString();
+            MonthList.July = tblTemp.Compute("sum(bal)", "MonthNum=7").ToString();
+            MonthList.August = tblTemp.Compute("sum(bal)", "MonthNum=8").ToString();
+            MonthList.Sep = tblTemp.Compute("sum(bal)", "MonthNum=9").ToString();
+            MonthList.Oct = tblTemp.Compute("sum(bal)", "MonthNum=10").ToString();
+            MonthList.Nov = tblTemp.Compute("sum(bal)", "MonthNum=11").ToString();
+            MonthList.Dec = tblTemp.Compute("sum(bal)", "MonthNum=12").ToString();
+            //System.Web.Script.Serialization.JavaScriptSerializer serializer = new System.Web.Script.Serialization.JavaScriptSerializer();
+            //List<Dictionary<string, object>> rows = new List<Dictionary<string, object>>();
+            //Dictionary<string, object> row;
+            //foreach (DataRow dr in ds.Tables["tbltemp"].Rows)
+            //{
+            //    row = new Dictionary<string, object>();
+            //    foreach (DataColumn col in ds.Tables["tbltemp"].Columns)
+            //    {
+
+            //        row.Add(col.ColumnName, dr[col]);
+            //    }
+            //    rows.Add(row);
+            //    //string sub = ds.Tables["tbltemp"].Rows[i]["varMealTime"].ToString();
+            //    //string customer = ds.Tables["tbltemp"].Rows[i]["CustomerName"].ToString();
+            //    //string guestcount = ds.Tables["tbltemp"].Rows[i]["intTotalGuest"].ToString();
+            //    //string location = ds.Tables["tbltemp"].Rows[i]["varAbbrivation"].ToString();
+            //    //string date = ds.Tables["tbltemp"].Rows[i]["dtFunctionDate"].ToString();
+            //    //string from = ds.Tables["tbltemp"].Rows[i]["dtFunctionTime"].ToString();
+
+
+            //    //customer = CultureInfo.CurrentCulture.TextInfo.ToTitleCase(customer.ToLower());
+            //    //if (customer.Length > 12)
+            //    //{
+            //    //    customer = customer.Substring(0, 11);
+            //    //    customer += "...";
+            //    //}
+
+            //    //if (from != null && from != "")
+            //    //{
+            //    //    from = from.Substring(0, 8);
+            //    //}
+
+            //    string to = ds.Tables["tbltemp"].Rows[i]["dtFunctionToTime"].ToString();
+            //    if (to != null && to != "")
+            //    {
+            //        to = to.Substring(0, 6);
+            //    }
+            //    events.Add(new Events()
+            //    {
+            //        id = ds.Tables["tbltemp"].Rows[i]["intSeqId"].ToString(),
+            //        title = customer + "\n" + sub + "\n" + location,
+            //        GuestCount = guestcount,
+            //        start = date + " " + from,
+            //        end = date + " " + to,
+            //        Status = ds.Tables["tbltemp"].Rows[i]["varStatus"].ToString()
+            //    });
+            //    i++;
+            //}
+            return Json(MonthList, JsonRequestBehavior.AllowGet);
+
+        }
+
+
+
+
+        public JsonResult SalePurchase(string dtfromDate,string dtTodate)
+        {
+            Balances Bal = new Balances();
+            AMS_SAASEntities db = new AMS_SAASEntities();
+            int ClientId = sql.getClientId();
+        //    string dtFromDate = DateTime.Now.ToShortDateString();
+            var dtfdate = dtfromDate.Split('/');
+            string parmsFdate = dtfdate[2] + "-" + dtfdate[1] + "-" + dtfdate[0];
+            parmsFdate += " 23:59:59";
+            var dttdate = dtTodate.Split('/');
+            string parmsTdate = dttdate[2] + "-" + dttdate[1] + "-" + dttdate[0];
+            parmsTdate += " 23:59:59";
+            int Days= db.Database.SqlQuery<int>("select Convert(int,DateDiff(DAY,Convert(DateTime, '"+ parmsFdate + "'),Convert(DateTime,'"+ parmsTdate + "' ))) dtDiff").FirstOrDefault();
+            sql = new SqlClass();
+            int SaleAcc = Convert.ToInt32(db.tblPreferences.Where(x => x.intClientId == ClientId).Select(x => x.intSaleAccId).FirstOrDefault());
+            string varOldAccount = db.tblChartOfAccounts.FirstOrDefault(x => x.intSeqId == SaleAcc).varOldAccount.ToString();
+            string str = " spGetAccountBalanceBetweenDatesCons1 '" + parmsFdate + "','" + parmsTdate + "','" + varOldAccount + "'," + sql.getCompanyId() + "," + -2 + "," + sql.getClientId();
+            DataTable dtLoad = sql.LoadData(str, "tblSale");
+            System.Web.Script.Serialization.JavaScriptSerializer serializer = new System.Web.Script.Serialization.JavaScriptSerializer();
+            List<Dictionary<string, object>> rows = new List<Dictionary<string, object>>();
+            Dictionary<string, object> row;
+            foreach (DataRow dr in dtLoad.Rows)
+            {
+                row = new Dictionary<string, object>();
+                foreach (DataColumn col in dtLoad.Columns)
+                {
+                    row.Add(col.ColumnName, dr[col]);
+                }
+                rows.Add(row);
+                Bal.Sale = Convert.ToDouble(rows[0]["bal"]);
+            }
+            int PurchaseAcc = Convert.ToInt32(db.tblPreferences.Where(x => x.intClientId == ClientId).Select(x => x.intPurchaseAccId).FirstOrDefault());
+            string varOldAcount = db.tblChartOfAccounts.FirstOrDefault(x => x.intSeqId == PurchaseAcc).varOldAccount.ToString();
+            string str1 = " spGetAccountBalanceBetweenDatesCons1 '" + parmsFdate + "','" + parmsTdate + "','" + varOldAcount + "'," + sql.getCompanyId() + "," + -2 + "," + sql.getClientId();
+            DataTable dtLod = sql.LoadData(str1, "tblPurchase");
+            System.Web.Script.Serialization.JavaScriptSerializer serializers = new System.Web.Script.Serialization.JavaScriptSerializer();
+            List<Dictionary<string, object>> rows1 = new List<Dictionary<string, object>>();
+           // Dictionary<string, object> row1;
+            foreach (DataRow dr in dtLod.Rows)
+            {
+                row = new Dictionary<string, object>();
+                foreach (DataColumn col in dtLod.Columns)
+                {
+                    row.Add(col.ColumnName, dr[col]);
+                }
+                rows1.Add(row);
+                Bal.Purchase = Convert.ToDouble(rows1[0]["bal"]);
+            }
+
+            //Expense balance
+           
+
+          
+            int ExpAcc = Convert.ToInt32(db.tblPreferences.Where(x => x.intClientId == ClientId).Select(x => x.intExpAccId).FirstOrDefault());
+            string varExpOldAcount = db.tblChartOfAccounts.FirstOrDefault(x => x.intSeqId == ExpAcc).varOldAccount.ToString();
+            string strexp = " spGetAccountBalanceBetweenDatesCons1 '" + parmsFdate + "','" + parmsTdate + "','" + varExpOldAcount + "'," + sql.getCompanyId() + "," + -2 + "," + sql.getClientId();
+            DataTable dtLodExp = sql.LoadData(strexp, "tblExp");
+            System.Web.Script.Serialization.JavaScriptSerializer serializersExp = new System.Web.Script.Serialization.JavaScriptSerializer();
+            List<Dictionary<string, object>> rowsExp = new List<Dictionary<string, object>>();
+           // Dictionary<string, object> row1;
+            foreach (DataRow dr in dtLodExp.Rows)
+            {
+                row = new Dictionary<string, object>();
+                foreach (DataColumn col in dtLodExp.Columns)
+                {
+                    row.Add(col.ColumnName, dr[col]);
+                }
+                rowsExp.Add(row);
+                Bal.Expense = Convert.ToDouble(rowsExp[0]["bal"]);
+            }
+
+         
+            Bal.Expense = Bal.Expense - Bal.Purchase;
+            //try
+            //{
+            //    //Capital Balance
+            //    string TodayDate = DateTime.Now.ToString("yyyy-MM-dd"); //DateTime.Now.ToString("dd/MM/yyyy");
+            //string Oldcap = "spGetAccountBalanceDateWiseCons1 '" + TodayDate + "','04'," + sql.getCompanyId() + "," + -2 + "," + sql.getClientId();
+            //spGetAccountBalanceDateWiseCons1_Result OldCapNet = db.Database.SqlQuery<spGetAccountBalanceDateWiseCons1_Result>(Oldcap).FirstOrDefault();
+            //double CapBal = Convert.ToDouble(OldCapNet.bal);
+            //CapBal = CapBal * -1;
+
+            ////Profit Balance
+            //DashboardsController DController = new DashboardsController();
+            //string opdtStr = "select Case When Convert(Datetime, '" + parmsFdate + "') > dtVoucherDate Then  CONVERT(VARCHAR(10), Convert(Datetime,'" + parmsFdate + "'), 103) Else CONVERT(VARCHAR(10), dtVoucherDate, 103) End dtDated from tblVoucherMaster Where intclientid=" + sql.getClientId() + " and varVoucherType='OP'";
+            //string dtOp = db.Database.SqlQuery<string>(opdtStr).FirstOrDefault();
+            //    if (dtOp=="" || dtOp==null)
+            //    {
+            //        dtOp = dtfromDate;
+            //    }
+
+            //PLAllClasses ProfitResult = (PLAllClasses)DController.ProfitLossDetail(dtOp, dtTodate).Data;
+            //double ProfitBal = Convert.ToDouble(ProfitResult.Totals[3].bal);
+            //Bal.ProfitBal = ProfitBal;
+
+            //if (CapBal!=0)
+            //{
+           
+            //    //Calculating Profit Percentage
+            //    Bal.ProfitPercentage = (ProfitBal / CapBal) * 100;
+            //    double PerDayProfit = ProfitBal / Days>0?Days:1;
+            //    if (Double.IsInfinity((CapBal - ProfitBal) / PerDayProfit))
+            //    {
+            //        Bal.ProfitReturnDays = 0;
+            //    }
+            //    else
+            //    {
+            //        Bal.ProfitReturnDays = (CapBal - ProfitBal) / PerDayProfit;
+            //    }
+                
+            //}
+            //else
+            //{
+            //    Bal.ProfitPercentage = 0;
+            //    Bal.ProfitReturnDays = 0;
+                
+            //}
+            //}
+            //catch (Exception)
+            //{
+
+            //    Bal.ProfitPercentage = 0;
+            //    Bal.ProfitReturnDays = 0;
+            //}
+
+
+
+            return Json(serializer.Serialize(Bal));
+        }
+
+
+
+        protected void btnConvert_Click(ReportDocument doc, string fname)
+        {
+            // Handles btnConvert.Click
+            try
+            {
+                ExportOptions ExpOptions;
+                DiskFileDestinationOptions DiskFileDestOpts = new DiskFileDestinationOptions();
+                PdfRtfWordFormatOptions FormatTypeOpts = new PdfRtfWordFormatOptions();
+                DiskFileDestOpts.DiskFileName = (Server.MapPath("") + ("\\UploadFolder\\"
+                            + (fname + ".pdf")));
+
+                ExpOptions = doc.ExportOptions;
+                
+                ExpOptions.ExportDestinationType = ExportDestinationType.DiskFile;
+                ExpOptions.ExportFormatType = ExportFormatType.PortableDocFormat;
+                ExpOptions.DestinationOptions = DiskFileDestOpts;
+                ExpOptions.FormatOptions = FormatTypeOpts;
+                doc.Export();
+            }
+            catch (Exception Ex)
+            {
+                Response.Write((Ex.Message + (" " + Ex.StackTrace)));
+            }
+
+        }
+
+
+        public string SendEmailAccLedgPDF(string txtToEmailAttendance, string txtEmailCC, string txtEmailBCC, string txtEmailSubject, string txtEmailBody , string dtFrom, string dtToDate, string AccountNumber)
+        {
+
+            //string msg = "";
+            //string emailTo = ConfigurationManager.AppSettings["To"].ToString();
+            //string ServerName = ConfigurationManager.AppSettings["host"].ToString();
+            //string UserName = ConfigurationManager.AppSettings["UserName"].ToString();
+            //string Password = ConfigurationManager.AppSettings["password"].ToString();
+            //string strPort = ConfigurationManager.AppSettings["port"].ToString();
+            //bool ssl;
+
+            System.Net.Mail.MailMessage objMail = new System.Net.Mail.MailMessage();
+            objMail.To.Add(txtToEmailAttendance);
+
+            string[] CCId = txtEmailCC.Split(',');
+
+            if (CCId != null && CCId[0] != "")
+            {
+                foreach (string CCEmail in CCId)
+                {
+                    objMail.CC.Add(new MailAddress(CCEmail)); //Adding CC email Id
+                }
+            }
+
+            string[] BCCId = txtEmailBCC.Split(',');
+
+            if (BCCId != null && BCCId[0] != "")
+            {
+                foreach (string BCCEmail in BCCId)
+                {
+                    objMail.Bcc.Add(new MailAddress(BCCEmail));
+                }
+            }
+            string pathReport = (Path.Combine(Server.MapPath("~/Areas/Accounts/Reports"), "LedgerForConsNewDetailStandard.rpt"));
+            
+            ReportDocument reportDocument = new ReportDocument();
+            reportDocument.Load(pathReport);
+
+            //using (StreamWriter sw = System.IO.File.AppendText(System.Web.HttpContext.Current.Server.MapPath("") + "/DashboardTimerTwo.txt"))
+            //{
+            //    sw.WriteLine("1707 : " + DateTime.Now + " _ Company id : ");
+            //}
+
+            var dtFm = dtFrom.Split('/');
+            var dttoo = dtToDate.Split('/');
+            string dtfrom = "" + dtFm[2] + "-" + dtFm[1] + "-" + dtFm[0] + "";
+            string dtTo = "" + dttoo[2] + "-" + dttoo[1] + "-" + dttoo[0] + "";
+            int account = Convert.ToInt32(AccountNumber);
+            var query1 = "Select varoldaccount as OldAccNo,varTitle from tblChartOfAccount where  intSeqId=" + AccountNumber + " and intclientid=" + sql.getClientId();
+            DataTable dt1 = sql.LoadData(query1, "tbl");
+            // start 
+
+            string str1 = " spGetAccountBalanceDateWiseCons1 '" + dtTo + " 23:59:00','" + AccountNumber + "'," + sql.getCompanyId() + "," + -2 + "," + sql.getClientId();
+            DataTable tblAccountLedgerOP = sql.LoadData(str1, "tblOPBal");
+
+
+
+
+            string bodyAttached = "Attached is ledger of " + dt1.Rows[0]["varTitle"] + " having closing balance " + Convert.ToDouble(tblAccountLedgerOP.Rows[0]["bal"]).ToString("N0") + " on " + dtToDate + ".";
+            
+            // End
+
+            var query = "spGetAccountBalanceDateWiseCons1 " + "'" + Convert.ToDateTime(dtfrom) + "' ," + "'" + account + "'" + "," + sql.getCompanyId() + "," + -2 + "," + sql.getClientId();
+            DataTable dt = sql.LoadData(query, "tbl");
+
+            reportDocument.SetParameterValue("@openingBal", dt.Rows[0]["bal"]);
+            reportDocument.SetParameterValue("@cust", "Testing cust");
+
+            reportDocument.SetParameterValue("@fromDate", dtfrom);
+            reportDocument.SetParameterValue("@toDate", dtTo);
+            reportDocument.SetParameterValue("@title", "Testing title");
+            reportDocument.SetParameterValue("@accId", account);
+            AMS_SAASEntities datacontext = new AMS_SAASEntities();
+            int UCompanyId = sql.getCompanyId();
+            int CId = sql.getClientId();
+            string CompanyName = datacontext.tblCompanies.Where(x => x.intClientId == CId).Select(x => x.varName).FirstOrDefault();
+            reportDocument.SetParameterValue("@CompName", CompanyName);
+            reportDocument.SetParameterValue("@franchName", "All");
+
+            reportDocument.SetParameterValue("@ClientId", CId);
+
+            string fileName = DateTime.Now.ToString("ddmmyyyymmss") + "AccountLedgPDF";
+            //  @openingBal
+            //   reportDocument.SetParameterValue("@toDate", "");
+
+            TableLogOnInfos crtableLogoninfos = new TableLogOnInfos();
+            TableLogOnInfo crtableLogoninfo = new TableLogOnInfo();
+            ConnectionInfo crConnectionInfo = new ConnectionInfo();
+            Tables CrTables = null;
+            if (true)
+            {
+                crConnectionInfo.ServerName = ConfigurationManager.AppSettings["server1"];
+                crConnectionInfo.DatabaseName = ConfigurationManager.AppSettings["database1"];
+                crConnectionInfo.UserID = ConfigurationManager.AppSettings["user1"];
+                crConnectionInfo.Password = ConfigurationManager.AppSettings["pwd1"];
+            }
+            CrTables = reportDocument.Database.Tables;
+            foreach (CrystalDecisions.CrystalReports.Engine.Table CrTable in CrTables)
+            {
+                crtableLogoninfo = CrTable.LogOnInfo;
+                crtableLogoninfo.ConnectionInfo = crConnectionInfo;
+                CrTable.ApplyLogOnInfo(crtableLogoninfo);
+            }
+            btnConvert_Click(reportDocument, fileName);
+           
+
+            objMail.From = new System.Net.Mail.MailAddress("donotreply@primeledge.com");
+            objMail.Subject = txtEmailSubject;
+
+
+            System.Net.Mail.Attachment att = new Attachment((Server.MapPath("") + ("\\UploadFolder\\" + fileName+".pdf")));
+            objMail.Attachments.Add(att);
+
+
+            objMail.Priority = System.Net.Mail.MailPriority.High;
+            System.Net.Mail.SmtpClient objSmtpClient = new System.Net.Mail.SmtpClient();
+            objSmtpClient.Timeout = 120000;
+            System.Net.NetworkCredential smtpCredintials = new System.Net.NetworkCredential();
+            smtpCredintials.UserName = "donotreply@primeledge.com";
+            smtpCredintials.Password = "kGlgrcd4Dptix.5";
+
+            //objSmtpClient.UseDefaultCredentials = false;
+            objSmtpClient.Credentials = smtpCredintials;
+
+            objSmtpClient.Host = "mail.primeledge.com";
+            objSmtpClient.Port = Convert.ToInt32(587);
+           // objSmtpClient.EnableSsl = false;
+            objMail.IsBodyHtml = true;
+            objMail.Body += bodyAttached + "<br /> <br />" +  txtEmailBody ;
+
+
+          
+
+
+            objSmtpClient.Send(objMail);
+
+
+
+
+            return "loaded data";
+
+        }
+
+        public JsonResult CashBookBal(string dtfromDate, string AccountId)
+        {
+            CashBookBal Bal = new CashBookBal();
+            AMS_SAASEntities db = new AMS_SAASEntities();
+            int ClientId = sql.getClientId();
+            //    string dtFromDate = DateTime.Now.ToShortDateString();
+            var dtfdate = dtfromDate.Split('/');
+
+            AMS_SAASEntities Entity = new AMS_SAASEntities();
+            int intClientId = Convert.ToInt32(sql.getClientId());
+
+            int parentId = Entity.tblPreferences.Where(m => m.intClientId == intClientId).Select(m => m.intSeqId).FirstOrDefault();
+
+            var query1 = " Select varOldAccount from tblChartOfAccount Where intSeqId = ( select intCashAccId from tblpreference where intclientid = " + intClientId + ") and intclientid = " + intClientId + "";
+            DataTable dt1 = sql.LoadData(query1, "tbl1");
+
+            string oldAccountid = "-1";
+
+            if (dt1.Rows.Count > 0)
+            {
+                oldAccountid = dt1.Rows[0]["varOldAccount"].ToString();
+            }
+            string parmsFdate = dtfdate[2] + "-" + dtfdate[1] + "-" + dtfdate[0];
+            parmsFdate += " 00:00:00";
+
+            int AccId = Convert.ToInt32(AccountId);
+          // string varOldAccount = db.tblChartOfAccounts.FirstOrDefault(x => x.intSeqId == AccId).varOldAccount.ToString();
+            string str = " [spGetAccountBalanceDateWiseConsForSingleAccount] '" + parmsFdate + "','" + oldAccountid + "', -2 ," + sql.getClientId()+", "+AccountId +"";
+            DataTable dtLoad = sql.LoadData(str, "tblopening");
+            System.Web.Script.Serialization.JavaScriptSerializer serializer = new System.Web.Script.Serialization.JavaScriptSerializer();
+            List<Dictionary<string, object>> rows = new List<Dictionary<string, object>>();
+            Dictionary<string, object> row;
+            foreach (DataRow dr in dtLoad.Rows)
+            {
+                row = new Dictionary<string, object>();
+                foreach (DataColumn col in dtLoad.Columns)
+                {
+                    row.Add(col.ColumnName, dr[col]);
+                }
+                rows.Add(row);
+                Bal.Opening = Convert.ToDouble(rows[0]["bal"]);
+            }
+
+            parmsFdate = dtfdate[2] + "-" + dtfdate[1] + "-" + dtfdate[0];
+           // parmsFdate += " 23:59:59";
+
+            //string varOldAcount = db.tblChartOfAccounts.FirstOrDefault(x => x.intSeqId == AccId).varOldAccount.ToString();
+            //string str1 = " spGetAccountBalanceDateWiseCons '" + parmsFdate + "','" + varOldAcount + "',-2," + sql.getClientId();
+            //DataTable dtLod = sql.LoadData(str1, "tblClosing");
+            //System.Web.Script.Serialization.JavaScriptSerializer serializers = new System.Web.Script.Serialization.JavaScriptSerializer();
+            //List<Dictionary<string, object>> rows1 = new List<Dictionary<string, object>>();
+            //// Dictionary<string, object> row1;
+            //foreach (DataRow dr in dtLod.Rows)
+            //{
+            //    row = new Dictionary<string, object>();
+            //    foreach (DataColumn col in dtLod.Columns)
+            //    {
+            //        row.Add(col.ColumnName, dr[col]);
+            //    }
+            //    rows1.Add(row);
+            //    Bal.Closing = Convert.ToDouble(rows1[0]["bal"]);
+            //}
+
+            string str2 = " spGetCashBookBalances '" + parmsFdate + "','" + AccountId + "',-2," + sql.getClientId();
+            DataTable dtLoadR = sql.LoadData(str2, "dtLoadReceiptPayment");
+            //S//ystem.Web.Script.Serialization.JavaScriptSerializer serializers = new System.Web.Script.Serialization.JavaScriptSerializer();
+            List<Dictionary<string, object>> rows2 = new List<Dictionary<string, object>>();
+            // Dictionary<string, object> row1;
+            foreach (DataRow dr in dtLoadR.Rows)
+            {
+                row = new Dictionary<string, object>();
+                foreach (DataColumn col in dtLoadR.Columns)
+                {
+                    row.Add(col.ColumnName, dr[col]);
+                }
+                rows2.Add(row);
+                Bal.Receive = Convert.ToDouble(rows2[0]["Receipts"]);
+                Bal.Payment = Convert.ToDouble(rows2[0]["Payments"]);
+            }
+
+            Bal.Closing = Bal.Opening + Bal.Receive - Bal.Payment;
+
+            string varr= "spGetCashBookBalancesDetail '" + parmsFdate + "'," + AccId + ",-2," + ClientId + " ";
+
+            Bal.ReceiptList = db.Database.SqlQuery<spGetCashBookBalancesDetail_Result>("spGetCashBookBalancesDetail '"+ parmsFdate + "',"+AccId+",-2,"+ClientId+"").Where(x=>x.Receipts>0).ToList();
+
+            Bal.PaymentList = db.Database.SqlQuery<spGetCashBookBalancesDetail_Result>("spGetCashBookBalancesDetail '" + parmsFdate + "'," + AccId + ",-2," + ClientId + "").Where(x=>x.Payment>0).ToList();
+
+            //  Bal.ChequeList = db.Database.SqlQuery<spGetCashBookBalancesDetail_Result>("spGetCashBookChequeBalancesDetail '" + parmsFdate + "'," + AccId + ",-2," + ClientId + "").ToList();
+
+            Bal.Cheque = 0;//Convert.ToDouble(Bal.ChequeList.Sum(x => x.Receipts).ToString());
+
+
+            //string str2 = " spGetCashBookBalances '" + parmsFdate + "','" + AccountId + "',-2," + sql.getClientId();
+            DataTable dtLoadRDetail = sql.LoadData(varr, "BalancesDetailCashBook");
+
+            string receiptResult = "None";
+            string paymentResult = "None";
+
+            double receiptCounter = 0;
+            double receiptSigned = 0;
+            double paymentCounter = 0;
+            double paymentSigned = 0;
+
+            if (dtLoadRDetail.Rows.Count>0)
+            {
+                for (int i=0;i< dtLoadRDetail.Rows.Count;i++)
+                {
+                    double receipt = Convert.ToDouble(dtLoadRDetail.Rows[i]["Receipts"]);
+                    double payment = Convert.ToDouble(dtLoadRDetail.Rows[i]["Payment"]);
+
+                    if (receipt > 0)
+                    {
+                        receiptSigned += Convert.ToInt32(dtLoadRDetail.Rows[i]["isSigned"]);
+                        receiptCounter++;
+                    }
+                    if (payment > 0)
+                    {
+                        paymentSigned += Convert.ToInt32(dtLoadRDetail.Rows[i]["isSigned"]);
+                        paymentCounter++;
+                    }
+                }
+            }
+
+
+            double resultRec = receiptSigned / receiptCounter;
+            double resultPay = paymentSigned / paymentCounter;
+
+            if(resultRec==1)
+            {
+                receiptResult = "All";
+            }
+            else if (resultRec == 0)
+            {
+                receiptResult = "None";
+            }
+            else if (resultRec > 0)
+            {
+                receiptResult = "Partial";
+            }
+
+
+            if (resultPay == 1)
+            {
+                paymentResult = "All";
+            }
+            else if (resultPay == 0)
+            {
+                paymentResult = "None";
+            }
+            else if (resultPay > 0)
+            {
+                paymentResult = "Partial";
+            }
+
+
+            Bal.ReceiptResult = receiptResult;
+            Bal.PaymentResult = paymentResult;
+
+            return Json(serializer.Serialize(Bal));
+        }
+
+
+        public void SavechkCashBookVal(string voucherId,string refType,string seqid,bool chk)
+        {
+            int idSeq = Convert.ToInt32(seqid);
+            int voucher = Convert.ToInt32(voucherId);
+            int clientid = sql.getClientId();
+            using (var db = new AMS_SAASEntities())
+            {
+                var result=from x in db.tblVoucherDetails
+                           where x.intSeqId == idSeq && x.intVoucherId== voucher && x.varRefType== refType && x.intClientId== clientid
+                           select x;
+
+                tblVoucherDetail VD = result.FirstOrDefault();
+                VD.isSigned = chk;
+                db.SaveChanges();
+
+            }
+        }
+
+
+        public string LoadDots(string divIdP,string monthYearP,string accIdP)
+        {
+
+            if(accIdP =="? undefined:undefined ?")
+            {
+
+                string str1 = " select top 1 intseqid from tblChartOfAccount where intclientid =" + sql.getClientId() + " and isActive = 1 and isOperative = 1 and intParentAccountId = ";
+                str1 += " (select intCashAccId from tblPreference where intclientid = " + sql.getClientId()+")  ";
+                DataTable dtLoadRStr1 = sql.LoadData(str1, "dtLoadReceiptPayment");
+                if(dtLoadRStr1.Rows.Count>0)
+                {
+                    accIdP = dtLoadRStr1.Rows[0]["intseqid"].ToString();
+                }
+                
+            }
+
+            //DateTime dtCurrent=DateTime.ParseExact(divIdP+ monthYearP,"d/MM")
+
+            DateTime dtCurrent = Convert.ToDateTime(divIdP +"-" +monthYearP);
+            string dot = "<br />";
+            string newVar = "";
+
+            string str2 = " [dbo].[spGetCashBookBalancesisSigned] '" + dtCurrent.ToString("yyyy-MM-dd") + "','"+ accIdP + "',-2," + sql.getClientId();
+
+
+
+
+
+            DataTable dtLoadR = sql.LoadData(str2, "dtLoadReceiptPayment");
+            try
+            {
+                if(Convert.ToInt32(dtLoadR.Rows[0]["TotalRecords"])>0)
+                {
+                    dot += "<label style=width:7px;background-color:" + dtLoadR.Rows[0]["isSigned"] + ";border-radius:100%;height:7px;></label>";
+                }
+                    
+            }
+            catch (Exception ex)
+            {
+                //   File.WriteAllText(HttpContext.Current.Server.MapPath("") & "/abc.txt", ex.Message)
+                newVar = ex.Message;
+            }
+
+            return divIdP + "~" + dot;
+        }
+
+
+
+
+
+
+        public JsonResult ProfitLossBalance(string dtfromDate, string dtTodate)
+        {
+            Balances Bal = new Balances();
+            AMS_SAASEntities db = new AMS_SAASEntities();
+            int ClientId = sql.getClientId();
+            //    string dtFromDate = DateTime.Now.ToShortDateString();
+            var dtfdate = dtfromDate.Split('/');
+            string parmsFdate = dtfdate[2] + "-" + dtfdate[1] + "-" + dtfdate[0];
+            parmsFdate += " 23:59:59";
+            var dttdate = dtTodate.Split('/');
+            string parmsTdate = dttdate[2] + "-" + dttdate[1] + "-" + dttdate[0];
+            parmsTdate += " 23:59:59";
+            int Days = db.Database.SqlQuery<int>("select Convert(int,DateDiff(DAY,Convert(DateTime, '" + parmsFdate + "'),Convert(DateTime,'" + parmsTdate + "' ))) dtDiff").FirstOrDefault();
+            sql = new SqlClass();
+            //int SaleAcc = Convert.ToInt32(db.tblPreferences.Where(x => x.intClientId == ClientId).Select(x => x.intSaleAccId).FirstOrDefault());
+            //string varOldAccount = db.tblChartOfAccounts.FirstOrDefault(x => x.intSeqId == SaleAcc).varOldAccount.ToString();
+            //string str = " spGetAccountBalanceBetweenDatesCons1 '" + parmsFdate + "','" + parmsTdate + "','" + varOldAccount + "'," + sql.getCompanyId() + "," + -2 + "," + sql.getClientId();
+            //DataTable dtLoad = sql.LoadData(str, "tblSale");
+            //System.Web.Script.Serialization.JavaScriptSerializer serializer = new System.Web.Script.Serialization.JavaScriptSerializer();
+            //List<Dictionary<string, object>> rows = new List<Dictionary<string, object>>();
+            //Dictionary<string, object> row;
+            //foreach (DataRow dr in dtLoad.Rows)
+            //{
+            //    row = new Dictionary<string, object>();
+            //    foreach (DataColumn col in dtLoad.Columns)
+            //    {
+            //        row.Add(col.ColumnName, dr[col]);
+            //    }
+            //    rows.Add(row);
+            //    Bal.Sale = Convert.ToDouble(rows[0]["bal"]);
+            //}
+            //int PurchaseAcc = Convert.ToInt32(db.tblPreferences.Where(x => x.intClientId == ClientId).Select(x => x.intPurchaseAccId).FirstOrDefault());
+            //string varOldAcount = db.tblChartOfAccounts.FirstOrDefault(x => x.intSeqId == PurchaseAcc).varOldAccount.ToString();
+            //string str1 = " spGetAccountBalanceBetweenDatesCons1 '" + parmsFdate + "','" + parmsTdate + "','" + varOldAcount + "'," + sql.getCompanyId() + "," + -2 + "," + sql.getClientId();
+            //DataTable dtLod = sql.LoadData(str1, "tblPurchase");
+            //System.Web.Script.Serialization.JavaScriptSerializer serializers = new System.Web.Script.Serialization.JavaScriptSerializer();
+            //List<Dictionary<string, object>> rows1 = new List<Dictionary<string, object>>();
+            //// Dictionary<string, object> row1;
+            //foreach (DataRow dr in dtLod.Rows)
+            //{
+            //    row = new Dictionary<string, object>();
+            //    foreach (DataColumn col in dtLod.Columns)
+            //    {
+            //        row.Add(col.ColumnName, dr[col]);
+            //    }
+            //    rows1.Add(row);
+            //    Bal.Purchase = Convert.ToDouble(rows1[0]["bal"]);
+            //}
+
+            //Expense balance
+
+
+
+            //int ExpAcc = Convert.ToInt32(db.tblPreferences.Where(x => x.intClientId == ClientId).Select(x => x.intExpAccId).FirstOrDefault());
+            //string varExpOldAcount = db.tblChartOfAccounts.FirstOrDefault(x => x.intSeqId == ExpAcc).varOldAccount.ToString();
+            //string strexp = " spGetAccountBalanceBetweenDatesCons1 '" + parmsFdate + "','" + parmsTdate + "','" + varExpOldAcount + "'," + sql.getCompanyId() + "," + -2 + "," + sql.getClientId();
+            //DataTable dtLodExp = sql.LoadData(strexp, "tblExp");
+            //System.Web.Script.Serialization.JavaScriptSerializer serializersExp = new System.Web.Script.Serialization.JavaScriptSerializer();
+            //List<Dictionary<string, object>> rowsExp = new List<Dictionary<string, object>>();
+            //// Dictionary<string, object> row1;
+            //Dictionary<string, object> row;
+            //foreach (DataRow dr in dtLodExp.Rows)
+            //{
+            //    row = new Dictionary<string, object>();
+            //    foreach (DataColumn col in dtLodExp.Columns)
+            //    {
+            //        row.Add(col.ColumnName, dr[col]);
+            //    }
+            //    rowsExp.Add(row);
+            //    Bal.Expense = Convert.ToDouble(rowsExp[0]["bal"]);
+            //}
+
+
+            //Bal.Expense = Bal.Expense - Bal.Purchase;
+            try
+            {
+                //Capital Balance
+                string TodayDate = DateTime.Now.ToString("yyyy-MM-dd"); //DateTime.Now.ToString("dd/MM/yyyy");
+                string Oldcap = "spGetAccountBalanceDateWiseCons1 '" + TodayDate + "','04'," + sql.getCompanyId() + "," + -2 + "," + sql.getClientId();
+                spGetAccountBalanceDateWiseCons1_Result OldCapNet = db.Database.SqlQuery<spGetAccountBalanceDateWiseCons1_Result>(Oldcap).FirstOrDefault();
+                double CapBal = Convert.ToDouble(OldCapNet.bal);
+                CapBal = CapBal * -1;
+
+                //Profit Balance
+                DashboardsController DController = new DashboardsController();
+                string opdtStr = "select Case When Convert(Datetime, '" + parmsFdate + "') > dtVoucherDate Then  CONVERT(VARCHAR(10), Convert(Datetime,'" + parmsFdate + "'), 103) Else CONVERT(VARCHAR(10), dtVoucherDate, 103) End dtDated from tblVoucherMaster Where intclientid=" + sql.getClientId() + " and varVoucherType='OP'";
+                string dtOp = db.Database.SqlQuery<string>(opdtStr).FirstOrDefault();
+                if (dtOp == "" || dtOp == null)
+                {
+                    dtOp = dtfromDate;
+                }
+
+                PLAllClasses ProfitResult = (PLAllClasses)DController.ProfitLossDetail(dtOp, dtTodate).Data;
+                double ProfitBal = Convert.ToDouble(ProfitResult.Totals[3].bal);
+                Bal.ProfitBal = ProfitBal;
+
+                if (CapBal != 0)
+                {
+
+                    //Calculating Profit Percentage
+                    Bal.ProfitPercentage = (ProfitBal / CapBal) * 100;
+                    double PerDayProfit = ProfitBal / Days > 0 ? Days : 1;
+                    if (Double.IsInfinity((CapBal - ProfitBal) / PerDayProfit))
+                    {
+                        Bal.ProfitReturnDays = 0;
+                    }
+                    else
+                    {
+                        Bal.ProfitReturnDays = (CapBal - ProfitBal) / PerDayProfit;
+                    }
+
+                }
+                else
+                {
+                    Bal.ProfitPercentage = 0;
+                    Bal.ProfitReturnDays = 0;
+
+                }
+            }
+            catch (Exception)
+            {
+
+                Bal.ProfitPercentage = 0;
+                Bal.ProfitReturnDays = 0;
+            }
+
+            System.Web.Script.Serialization.JavaScriptSerializer serializer = new System.Web.Script.Serialization.JavaScriptSerializer();
+
+            return Json(serializer.Serialize(Bal));
+        }
+        //[HttpPost]
+        //public JsonResult LineChartData()
+        //{
+        //    string fdate = DateTime.Now.Year + "-01-01";
+        //    string tdate = DateTime.Now.Year + "-12-31";
+        //    string query = "";
+        //    int i = 0;
+        //    if (ds.Tables["tblLineChart"] != null)
+        //    {
+        //        ds.Tables["tblLineChart"].Clear();
+        //    }
+        //    query += " select number, sum(tbl.Amnt)Amount from( ";
+        //    query += " select distinct number, 0 as Amnt from master..spt_values where number > 0 and number < 13 ";
+        //    query += " union all ";
+        //    query += " select Month(B.dtBookingDate) number, sum(convert(int, B.flAmount)) Amount ";
+        //    query += " from tblBooking B ";
+        //    query += " inner join tblBusSchedule BS on BS.intSeqid = B.intScheduleId ";
+        //    query += " inner join tblbuses Bus on Bus.intSeqid = BS.intBusId ";
+        //    query += " where B.dtBookingDate >= '" + fdate + "' and B.dtBookingDate <= '" + tdate + "' ";
+        //    query += " group by year(B.dtBookingDate), Month(B.dtBookingDate) ";
+        //    query += " )tbl ";
+        //    query += " group by number ";
+
+        //    bll.loadData(ref ds,query,"tblLineChart");
+
+        //    int[] AmountData = new int[12];
+        //    if (ds.Tables["tblLineChart"].Rows.Count > 0)
+        //    {
+        //        for (i = 0; i < ds.Tables["tblLineChart"].Rows.Count; i++)
+        //        {
+        //            AmountData[i] += Convert.ToInt32(ds.Tables["tblLineChart"].Rows[i]["Amount"]);
+        //        }
+        //    }
+        //    List<Datasets> _dataSet = new List<Datasets>();
+        //    _dataSet.Add(new Datasets()
+        //    {
+        //        label = "Current Year Sale",
+        //        data = AmountData,//new int[] { 28, 48, 40, 19, 86, 27, 90, 20, 45, 65, 34, 22 },
+        //        borderColor = new string[] { "#800080" },
+        //        borderWidth = "1",
+
+        //    });            
+        //    return Json(_chart, JsonRequestBehavior.AllowGet);
+        //}
+    }
+    public class Balances
+    {
+        //This class used on various places so do not change type or name of property
+        public double Cash;
+        public double Bank;
+        public double Stock;
+        public double Debtors;
+        public double Creditors;
+        public double ProfitBal;
+        public double Sale;
+        public double Purchase;
+        public double Expense;
+        public double LastMonthSale;
+        public double LastMonthPurchase;
+        public double ProfitPercentage;
+        public double ProfitReturnDays;
+    }
+
+
+    public class CashBookBal
+    {
+        //This class used on various places so do not change type or name of property
+        public double Opening;
+        public double Closing;
+        public double Receive;
+        public double Payment;
+        public double Cheque;
+        public List<spGetCashBookBalancesDetail_Result> ReceiptList { get; set; }
+        public List<spGetCashBookBalancesDetail_Result> PaymentList { get; set; }
+        public List<spGetCashBookBalancesDetail_Result> ChequeList { get; set; }
+
+        public string ReceiptResult;
+        public string PaymentResult;
+    }
+    public class CASHINOUT
+    {
+        public string Jan { get; set; }
+        public string Feb { get; set; }
+        public string Mar { get; set; }
+        public string April { get; set; }
+        public string May { get; set; }
+        public string June { get; set; }
+        public string July { get; set; }
+        public string August { get; set; }
+        public string Sep { get; set; }
+        public string Oct { get; set; }
+        public string Nov { get; set; }
+        public string Dec { get; set; }
+    }
+    public class PLClass
+    {
+        
+        public string vartitle { get; set; }
+        public string varaccountno { get; set; }
+        public bool isoperative { get; set; }
+        public string varOldAccount { get; set; }
+        public decimal bal { get; set; }
+    }
+
+    public class PLClassFinancialTransection
+    {
+        public decimal AccId { get; set; }
+        public string vartitle { get; set; }
+        public string varaccountno { get; set; }
+        public bool isoperative { get; set; }
+        public string varOldAccount { get; set; }
+        public decimal bal { get; set; }
+    }
+    public class PLAllClasses
+    {
+        public List<PLClass> RevenueAccounts { get; set; }
+        public List<PLClass> PurchaseAccounts { get; set; }
+        public List<PLClass> ExpenseAccounts { get; set; }
+        public List<PLClass> OpeningClosing { get; set; }
+        public List<PLClass> Totals { get; set; }
+        public List<PLClass> Adjustments { get; set; }
+    }
+}
+
+
+public class GetMorrisCharPaymentReceipt
+{
+    public string VoucherDate { get; set; }
+    public string Payment { get; set; }
+    public string Receipt { get; set; }
+
+    public GetMorrisCharPaymentReceipt(string VoucherD, string Pay, string Rec)
+    {
+        VoucherDate = VoucherD;
+        Payment = Pay;
+        Receipt = Rec;
+
+    }
+
+}
